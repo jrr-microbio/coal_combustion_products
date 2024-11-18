@@ -1,0 +1,88 @@
+sample-id	barcode-sequence	sample_num	site_id	pivot_id	reads	missing_geochem	site	sample_point	sample_type	sample_type_id	region
+Lys	GCTCATGA+TCGCATAA	Lys	Lys	Lys	383175	other	other	other	other	other	NA
+R01	GCTCATGA+AGCTAGAA	R01	R01	R01	470052	Time0Control	Time0ControlA	Time0ControlA	Time0Control	Time0ControlA	NA
+R02	GCTCATGA+ACTCTAGG	R02	R02	R02	21501	Time0Control	Time0ControlB	Time0ControlB	Time0Control	Time0ControlB	NA
+R4C1	GCTCATGA+ATAGCCTT	R4C1	R4C1	R4C1	516312	4DegControl	4DegControlA	4DegControlA	4DegControl	4DegControlA	NA
+R4C2	GCTCATGA+TAAGGCTC	R4C2	R4C2	R4C2	291750	4DegControl	4DegControlB	4DegControlB	4DegControl	4DegControlB	NA
+RRT1	GCTCATGA+TCTTACGC	RRT1	RRT1	RRT1	255729	RoomTempControl	RoomTempControlA	RoomTempControlA	RoomTempControl	RoomTempControlA	NA
+RRT2	GCTCATGA+CTTAATAG	RRT2	RRT2	RRT2	176427	RoomTempControl	RoomTempControlB	RoomTempControlB	RoomTempControl	RoomTempControlB	NA
+S1	TAAGGCGA+CTAGTCGA	1	G	22354	46550	present	22354	MW-16-01	GW-Downgradient	GW	interior_plains
+S10	TAAGGCGA+TCGCATAA	10	G	22354	454607	present	22354	MW-16-05	GW-Upgradient	GW	interior_plains
+S101	AAGAGGCA+ATAGCCTT	101	B	3586	75002	present	3586	MW74	GW-Upgradient	GW	intermontane_p
+S102	AAGAGGCA+TAAGGCTC	102	B	3586	780407	present	3586	MW75	GW-Upgradient	GW	intermontane_p
+S103	AAGAGGCA+TCGCATAA	103	B	3586	531252	present	3586	MW77	GW-Downgradient	GW	intermontane_p
+S104	GTAGAGGA+CTAGTCGA	104	B	3586	13150	present	3586	MW78	GW-Downgradient	GW	intermontane_p
+S105	GTAGAGGA+AGCTAGAA	105	B	3586	456270	present	3586	MW80	GW-Downgradient	GW	intermontane_p
+S106	GTAGAGGA+ACTCTAGG	106	B	3586	442058	present	3586	MW81	GW-Upgradient	GW	intermontane_p
+S107	GTAGAGGA+TCTTACGC	107	B	3586	12157	present	3586	MW82	GW-Downgradient	GW	intermontane_p
+S108	GTAGAGGA+CTTAATAG	108	B	3586	382887	present	3586	Evap. Pond (WC Area)	Ash Pond Water	Ash Pond	intermontane_p
+S109	GTAGAGGA+ATAGCCTT	109	B	3586	470518	present	3586	Patterson Well (CGS P3)	GW-Upgradient	GW	intermontane_p
+S11	CGTACTAG+CTAGTCGA	11	G	22354	514496	present	22354	MW-16-04	GW-Upgradient	GW	interior_plains
+S14	CGTACTAG+AGCTAGAA	14	G	22354	31295	present	22354	MW-16-03	GW-Upgradient	GW	interior_plains
+S15	CGTACTAG+ACTCTAGG	15	G	22354	468733	present	22354	PZ-5	CCP Porewater	Ash Pond	interior_plains
+S16	CGTACTAG+TCTTACGC	16	G	22354	486568	present	22354	MW-16-07	GW-Downgradient	GW	interior_plains
+S1601	GTAGAGGA+TCGCATAA	1601	O	46001	432655	present	46001	MW-1601	GW-Upgradient	GW	appalachian
+S1602	GCTCATGA+CTAGTCGA	1602	O	46001	29440	present	46001	MW-1602	GW-Upgradient	GW	appalachian
+S17	CGTACTAG+CTTAATAG	17	G	22354	503020	present	22354	PZ-1	CCP Porewater	Ash Pond	interior_plains
+S18	CGTACTAG+ATAGCCTT	18	G	22354	577597	present	22354	PZ-2	CCP Porewater	Ash Pond	interior_plains
+S19	CGTACTAG+TAAGGCTC	19	G	22354	476372	present	22354	PZ-3	CCP Porewater	Ash Pond	interior_plains
+S20	CGTACTAG+TCGCATAA	20	G	22354	292811	present	22354	PZ-4	CCP Porewater	Ash Pond	interior_plains
+S21	AGGCAGAA+CTAGTCGA	21	O	46001	479688	present	46001	P-1901	CCP Porewater	Ash Pond	appalachian
+S22	AGGCAGAA+AGCTAGAA	22	O	46001	19941	present	46001	P-1902	CCP Porewater	Ash Pond	appalachian
+S23	AGGCAGAA+ACTCTAGG	23	O	46001	433917	present	46001	P-1903	CCP Porewater	Ash Pond	appalachian
+S24	AGGCAGAA+TCTTACGC	24	O	46001	435936	present	46001	Toe Drain	CCP Porewater	Ash Pond	appalachian
+S26	AGGCAGAA+CTTAATAG	26	D	13116	156735	present	13116	NED1-FF	CCP Porewater	Ash Pond	interior_plains
+S27	AGGCAGAA+ATAGCCTT	27	A	13116	430566	present	13116	22-FF	GW-Upgradient	GW	interior_plains
+S29	AGGCAGAA+TAAGGCTC	29	K	33107	13451	present	33107	BG-3S	GW-Upgradient	GW	appalachian
+S3	TAAGGCGA+AGCTAGAA	3	O	46001	16473	present	46001	MW-1603	GW-Downgradient	GW	appalachian
+S30	AGGCAGAA+TCGCATAA	30	K	33107	534960	present	33107	GWA-12S	GW-Upgradient	GW	appalachian
+S31	TCCTGAGC+CTAGTCGA	31	K	33107	483568	present	33107	AB-10SL	CCP Porewater	Ash Pond	appalachian
+S32	TCCTGAGC+AGCTAGAA	32	K	33107	20374	present	33107	AB-21S	CCP Porewater	Ash Pond	appalachian
+S33	TCCTGAGC+ACTCTAGG	33	QC	QC	15317	missing	QC	FD-20231116-1	QC	QC	NA
+S34	TCCTGAGC+TCTTACGC	34	H	25410	524199	present	25410	Leach	CCP Porewater	Ash Pond	interior_plains
+S36	TCCTGAGC+CTTAATAG	36	L	35406	19401	present	35406	CA-1	CCP Porewater	Ash Pond	appalachian
+S38	TCCTGAGC+ATAGCCTT	38	L	35406	488459	present	35406	CA-2	CCP Porewater	Ash Pond	appalachian
+S39	TCCTGAGC+TAAGGCTC	39	L	35406	13989	present	35406	CA-3	CCP Porewater	Ash Pond	appalachian
+S4	TAAGGCGA+ACTCTAGG	4	O	46001	459914	present	46001	MW-1604	GW-Downgradient	GW	appalachian
+S40	TCCTGAGC+TCGCATAA	40	G	22354	88725	present	22354	MP-001F	Ash Pond Water	Ash Pond	interior_plains
+S41	GGACTCCT+CTAGTCGA	41	L	35406	562798	present	35406	Leachate Outfall 602	CCP Porewater	Ash Pond	appalachian
+S42	GGACTCCT+AGCTAGAA	42	L	35406	518411	present	35406	Jules Verne	CCP Porewater	Ash Pond	appalachian
+S43	GGACTCCT+ACTCTAGG	43	L	35406	266673	present	35406	S-1008	CCP Porewater	Ash Pond	appalachian
+S45	GGACTCCT+TCTTACGC	45	F	22348	509353	present	22348	C1P	CCP Porewater	Ash Pond	interior_plains
+S47	GGACTCCT+CTTAATAG	47	F	22348	13602	present	22348	C2P	CCP Porewater	Ash Pond	interior_plains
+S49	GGACTCCT+ATAGCCTT	49	F	22348	465795	present	22348	C3P	CCP Porewater	Ash Pond	interior_plains
+S5	TAAGGCGA+TCTTACGC	5	O	46001	471490	present	46001	MW-1605	GW-Downgradient	GW	appalachian
+S51	GGACTCCT+TAAGGCTC	51	F	22348	24332	present	22348	C4P	CCP Porewater	Ash Pond	interior_plains
+S53	GGACTCCT+TCGCATAA	53	F	22348	484994	present	22348	C5P	CCP Porewater	Ash Pond	interior_plains
+S55	TAGGCATG+CTAGTCGA	55	F	22348	19314	present	22348	C6P	CCP Porewater	Ash Pond	interior_plains
+S59	TAGGCATG+AGCTAGAA	59	F	22348	537725	present	22348	MW-15026	GW-Upgradient	GW	interior_plains
+S6	TAAGGCGA+CTTAATAG	6	I	25427	571453	present	25427	MW-17	GW-Upgradient	GW	interior_highlands
+S60	TAGGCATG+ACTCTAGG	60	I	25427	515732	present	25427	Leach	CCP Porewater	Ash Pond	interior_highlands
+S62	TAGGCATG+TCTTACGC	62	H	25410	570282	present	25410	BMW-35	GW-Upgradient	GW	interior_plains
+S64	TAGGCATG+CTTAATAG	64	C	13113	122058	present	13113	XPW-01-FIL	CCP Porewater	Ash Pond	interior_plains
+S65	TAGGCATG+ATAGCCTT	65	QC	QC	686404	missing	QC	FD02-12112023	QC	QC	NA
+S66	TAGGCATG+TAAGGCTC	66	QC	QC	595364	missing	QC	FD02-12122023	QC	QC	NA
+S67	TAGGCATG+TCGCATAA	67	QC	QC	504726	missing	QC	FD-20231212-1	QC	QC	NA
+S68	CTCTCTAC+CTAGTCGA	68	M	42195	22106	present	42195	TW12-12122023	CCP Porewater	Ash Pond	appalachian
+S73	CTCTCTAC+AGCTAGAA	73	C	13113	157290	present	13113	MW-393-FIL	GW-Downgradient	GW	interior_plains
+S74	CTCTCTAC+ACTCTAGG	74	C	13113	420046	present	13113	MW-370-FIL	GW-Downgradient	GW	interior_plains
+S75	CTCTCTAC+TCTTACGC	75	C	13113	536479	present	13113	MW-358-FIL	GW-Upgradient	GW	interior_plains
+S76	CTCTCTAC+CTTAATAG	76	N	42201	472578	present	42201	TW02-12122023	CCP Porewater	Ash Pond	appalachian
+S77	CTCTCTAC+ATAGCCTT	77	N	42201	162992	present	42201	TW03-12132023	CCP Porewater	Ash Pond	appalachian
+S8	TAAGGCGA+ATAGCCTT	8	G	22354	71385	present	22354	MW-16-06	GW-Downgradient	GW	interior_plains
+S81	CTCTCTAC+TAAGGCTC	81	J	33106	297175	present	33106	AB-12S 	GW-Upgradient	GW	appalachian
+S82	CTCTCTAC+TCGCATAA	82	J	33106	465997	present	33106	AB-21S 	CCP Porewater	Ash Pond	appalachian
+S83	CGAGGCTG+CTAGTCGA	83	J	33106	15333	present	33106	AB-23S 	CCP Porewater	Ash Pond	appalachian
+S84	CGAGGCTG+AGCTAGAA	84	J	33106	265874	present	33106	AB-24SL 	CCP Porewater	Ash Pond	appalachian
+S88	CGAGGCTG+ATAGCCTT	88	E	17481	493506	present	17481	SLF-MW-6	GW-Upgradient	GW	interior_plains
+S89	CGAGGCTG+TAAGGCTC	89	E	17481	494945	present	17481	SLF-MW-7	GW-Upgradient	GW	interior_plains
+S93	AAGAGGCA+ACTCTAGG	93	E	17481	504412	present	17481	Leachate (Day 1)	CCP Porewater	Ash Pond	interior_plains
+S85	CGAGGCTG+ACTCTAGG	85	E	17481	238381	present	17481	SLF-MW-2B	GW-Downgradient	GW	interior_plains
+S86	CGAGGCTG+TCTTACGC	86	E	17481	472158	present	17481	SLF-MW-3B	GW-Downgradient	GW	interior_plains
+S9	TAAGGCGA+TAAGGCTC	9	G	22354	214462	present	22354	MW-16-02	GW-Downgradient	GW	interior_plains
+S87	CGAGGCTG+CTTAATAG	87	E	17481	470363	present	17481	SLF-MW-5R/5B	GW-Downgradient	GW	interior_plains
+S90	CGAGGCTG+TCGCATAA	90	E	17481	494999	present	17481	PH-MW-01	GW-Upgradient	GW	interior_plains
+S91	AAGAGGCA+CTAGTCGA	91	E	17481	22332	present	17481	PH-MW-02	GW-Upgradient	GW	interior_plains
+S92	AAGAGGCA+AGCTAGAA	92	E	17481	567897	present	17481	PH-MW-03A	GW-Downgradient	GW	interior_plains
+S95	AAGAGGCA+TCTTACGC	95	E	17481	445688	present	17481	Leachate (Day 2)	CCP Porewater	Ash Pond	interior_plains
+S98	AAGAGGCA+CTTAATAG	98	B	3586	520966	present	3586	Porewater 1	CCP Porewater	Ash Pond	intermontane_p
