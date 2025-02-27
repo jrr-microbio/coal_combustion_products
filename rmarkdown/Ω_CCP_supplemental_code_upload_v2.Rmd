@@ -17,25 +17,36 @@ This is an R Markdown document. Markdown is a simple formatting syntax for autho
 
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
-```{r libraries}
+```{r libraries, ECHO=FALSE}
 library(indicspecies)
 library(vegan)
 library(mctoolsr)
 library(broom)
 library(ggnewscale)
 library(pheatmap)
+library(wesanderson)
+library(RColorBrewer)
+library(patchwork)
 library(tidyr)
 library(ggplot2)
 library(ggrepel)
 library(tidyverse)
 library(dplyr)
+library(phyloseq)
 ```
 
 ```{r read in data}
-setwd('/Users/rodr771/Library/CloudStorage/OneDrive-PNNL/Documents/CCP_GW_Bagwell/')
+
+#ASV Table generated via qiime2 with moving picture tutorial. Supplemental code is also available on the GitHub.
 
 #Read in full ASV table with all taxonomies.
-asv_input = read.table(file="/Volumes/Macintosh HD/Users/rodr771/Library/CloudStorage/OneDrive-PNNL/Documents/CCP_GW_Bagwell/_final_ASV_table.tsv", header=T, sep = "\t")
+asv_input = read.table(file="./_final_ASV_table.tsv", header=T, sep = "\t")
+
+num_otu_single_sample = asv_input %>%
+  rowwise() %>%
+  summarize(single_sample = sum(c_across(-c(1, 2:13)) > 0) == 1) %>%
+  summarize(sum(single_sample)) %>%
+  pull()
 
 #Split up just taxonomy to keep it separated.
 asv_taxonomy = asv_input %>%
@@ -49,20 +60,24 @@ asv_table_df = asv_input %>%
 #Let's now subset that to only those that from the control samples we wanted to compare.
 asv_table_controls_df = asv_table_df %>%
   select(-c(8:87)) %>%
-  select(-c("Lys")) #This was an extra sample that got thrown in here.
+  select(-c("Lys")) #This was an extra sample that got thrown in the sequencer
 
 #And let's make another one that is just the samples that we want to study re: experimental design questions.
 asv_table_experiment_df = asv_table_df %>%
   select(-c(1:7)) %>%
   select(-c("S33", "S65", "S66", "S67")) #remove these 4 which were QC samples.
 
+#write.csv(asv_table_experiment_df, file="_final_ASV_filtered_SITES.csv")
+
 #I rolled these up at the GTDB genera level so i'm going to read those in now.
-genera_rollup_input = read.table(file="/Volumes/Macintosh HD/Users/rodr771/Library/CloudStorage/OneDrive-PNNL/Documents/CCP_GW_Bagwell/_final_genera_taxonomic_overlap.tsv", header=T, sep = "\t", row.names=1)
+genera_rollup_input = read.table(file="./_final_genera_taxonomic_overlap.tsv", header=T, sep = "\t", row.names=1)
   
 genera_rollup_experiment_df = genera_rollup_input %>%
   select(-c("S33", "S65", "S66", "S67")) #remove these 4 which were QC samples.  
 
-metadata_table = read.table(file="/Volumes/Macintosh HD/Users/rodr771/Library/CloudStorage/OneDrive-PNNL/Documents/CCP_GW_Bagwell/_sample_metadata_final_87samples.tsv", header=T, row.names = 1, sep = "\t")
+#write.csv(genera_rollup_experiment_df, file="_final_genera_filtered_SITES.csv")
+
+metadata_table = read.table(file="./_sample_metadata_final_87samples.tsv", header=T, row.names = 1, sep = "\t")
 
 metadata_table_control_df = metadata_table %>%
   dplyr::slice(2:7)
@@ -71,19 +86,49 @@ metadata_table_experiment_df = metadata_table %>%
   dplyr::slice(-c(1:7)) %>%
   filter(!grepl("QC", sample_type))
 
-chemistry_df = read.table(file="/Volumes/Macintosh HD/Users/rodr771/Library/CloudStorage/OneDrive-PNNL/Documents/CCP_GW_Bagwell/ccp_chemistry_76sample_final.txt", header=T, sep = "\t")
+chemistry_df = read.table(file="./ccp_chemistry_76sample_final.txt", header=T, sep = "\t")
 
 #There are a handful of measurements here that I need to remove because there are not enough of them. Going to remove any measurement that is not present across at least 30 samples.
 chemistry_df_final = chemistry_df %>%
   select(-c(Ag, Br, P, U))
 
-variables_to_keep = c("asv_taxonomy", "asv_table_controls_df", "asv_table_experiment_df", "metadata_table_control_df", "metadata_table_experiment_df", "chemistry_df_final", "genera_rollup_experiment_df")
+#Making a metadata table from the chemistry df itself:
+chemistry_metadat = chemistry_df_final %>%
+  select(c(1:4))
+
+# Select and rename the 'site' column to 'Site' while ensuring it's of type character
+metadata_selected = metadata_table_experiment_df %>%
+  select(Site = site, region) %>%
+  distinct(Site, .keep_all = TRUE) %>%
+  mutate(Site = as.character(Site))
+
+# Ensure 'Site' in chemistry_metadat is of type character
+chemistry_metadat = chemistry_metadat %>%
+  mutate(Site = as.character(Site))
+
+# Merge the region column into the chemistry_metadat dataframe by the Site column
+chemistry_metadat = chemistry_metadat %>%
+  left_join(metadata_selected, by = "Site")
+
+#Now lets organize the chem table
+chemistry_df_withNA_input = chemistry_df_final %>%
+  column_to_rownames(var="site_id") %>%
+  select(-c(1:3)) %>%
+  mutate(across(everything(), as.numeric)) #make numeric because it'll yell if not below.
+
+#Ho boy. Lot of chemistry that is missing values here. Going to have to chop some of these off. Also - there are a significant amount of negative numbers in this dataset. There is no such thing as negative measurement here. Lets make everything that is less than 0 just a 0.
+
+chemistry_df_final_input_chemChop = chemistry_df_withNA_input %>%
+  select(-c(alk_bicarb, alk_carb, alk_total, Cl, Cu, DO, Mn, Ni, Mg, ORP, ph_lab, TURB, Zn)) %>%
+  mutate(across(where(is.numeric), ~ ifelse(. < 0, 0, .)))
+
+variables_to_keep = c("asv_taxonomy", "asv_table_controls_df", "asv_table_experiment_df", "metadata_table_control_df", "metadata_table_experiment_df", "chemistry_df_final", "genera_rollup_experiment_df", "genera_rollup_experiment_df_rel", "chemistry_df_final_input_chemChop")
 
 rm(list=setdiff(ls(), variables_to_keep)) #clean out the environment.
 
 ```
 
-```{r Bulk community-level statistics - OTUs}
+```{r Bulk community-level statistics}
 
 #First, let's start off with some PERMANOVA's and some NMDS to see if communities are unique across these different conditions.
 
@@ -93,7 +138,6 @@ asv_table_controls_df_rel = asv_table_controls_df %>%
 
 # PERMANOVA for controls
 dm.asv_control=calc_dm(asv_table_controls_df_rel, method = "bray")
-adonis2(formula = dm.asv_control ~ sample_type, data = metadata_table_control_df, permutations = 999)
 adonis2(formula = dm.asv_control ~ sample_type, data = metadata_table_control_df, permutations = 999)
 
 #Looks like none of the controls are significantly different, which is good and what we hoped.
@@ -107,22 +151,47 @@ dm.asv_experiment=calc_dm(asv_table_experiment_df_rel, method = "bray")
 adonis2(dm.asv_experiment ~ site, data = metadata_table_experiment_df, permutations = 999)
 adonis2(dm.asv_experiment ~ sample_type, data = metadata_table_experiment_df, permutations = 999)
 
-#Interesting, these communities do not appear to be significantly different to each other by "Upriver, Downriver, or Porewater", however they are significantly different by site. Which makes sense as these are fairly different locations. 
+#Need to remove the PW samples from this comparison as they are not influenced by region.
+PW_samples <- c("S108", "S15", "S17", "S18", "S19", "S20", "S21", "S22",
+                "S23", "S24", "S26", "S31", "S32", "S34", "S36", "S38",
+                "S39", "S40", "S41", "S42", "S43", "S45", "S47", "S49",
+                "S51", "S53", "S55", "S60", "S64", "S68", "S76", "S77",
+                "S82", "S83", "S84", "S93", "S95", "S98")
+
+PW_samples_nums <- sub("^S", "", PW_samples)
+
+#Remove specified columns from rel abund
+asv_table_experiment_df_rel_noPW <- asv_table_experiment_df_rel[ , !(names(asv_table_experiment_df_rel) %in% PW_samples)]
+
+#Remove the rows from metadat
+metadata_table_experiment_df_noPW <- metadata_table_experiment_df[!(metadata_table_experiment_df$sample_num %in% PW_samples_nums), ]
+
+dm.asv_experiment_noPW=calc_dm(asv_table_experiment_df_rel_noPW, method = "bray")
+adonis2(dm.asv_experiment_noPW ~ region, data = metadata_table_experiment_df_noPW, permutations = 999)
+
+#Interesting, these communities do not appear to be significantly different to each other by "Upgradient, Downgradient, or Porewater", however they are significantly different by site. Which makes sense as these are fairly different locations. 
 
 #Let's make the genera level rollup relative
-
 genera_rollup_experiment_df_rel = genera_rollup_experiment_df %>%
         mutate(across(everything(), ~ . / sum(.)))
 
 # PERMANOVA for experiment genera rollup
-dm.asv_experiment=calc_dm(genera_rollup_experiment_df_rel, method = "bray")
-adonis2(dm.asv_experiment ~ site, data = metadata_table_experiment_df, permutations = 999)
-adonis2(dm.asv_experiment ~ sample_type, data = metadata_table_experiment_df, permutations = 999)
+dm.genera_experiment=calc_dm(genera_rollup_experiment_df_rel, method = "bray")
+adonis2(dm.genera_experiment ~ site, data = metadata_table_experiment_df, permutations = 999)
+adonis2(dm.genera_experiment ~ sample_type, data = metadata_table_experiment_df, permutations = 999)
 
-#These genera-level rollups are not significantly different at a genera level. Only by site. Same as the ASV level.
+#Remove specified columns from rel abund
+genera_rollup_experiment_df_rel_noPW <- genera_rollup_experiment_df_rel[ , !(names(genera_rollup_experiment_df_rel) %in% PW_samples)]
 
+dm.genera_experiment_noPW=calc_dm(genera_rollup_experiment_df_rel_noPW, method = "bray")
+adonis2(dm.genera_experiment_noPW ~ region, data = metadata_table_experiment_df_noPW, permutations = 999)
+
+#These genera-level rollups are not significantly different. Only by site.
 
 #Let's do some NMDS on these ordinations.
+
+#write.csv(asv_table_experiment_df_rel, file="asv_relabund.csv")
+#write.csv(genera_rollup_experiment_df_rel, file="genera_relabund.csv")
 
 #
 #
@@ -184,6 +253,7 @@ sample_type_controls_noT0_NMDS
 
 #Yeah this is still rough. There's only 2 samples. I'm just going to put these on the backburner for now.
 
+
 #
 #
 #
@@ -200,34 +270,73 @@ Ord_experiment$sample_type = metadata_table_experiment_df$sample_type
 Ord_experiment$SampleID = rownames(Ord_experiment)
 Ord_experiment$sample_point = metadata_table_experiment_df$sample_point
 Ord_experiment$site = metadata_table_experiment_df$site
-
-mcolors=c("#628b29", "#ffcdbd", "#e66294","#2F9DA1", "#FF5F5F", "#c5c5c5", "#83deff", "#eeffc5",  "#39394a", "#eeca03", "#523910","#ffeea4", "#944abd", "#f69418")
-
-shape_values <- c("Ash Pond Water" = 15,
+Ord_experiment$region = metadata_table_experiment_df$region
+  
+shape_values = c("Ash Pond Water" = 15,
                   "CCP Porewater" = 16,
                   "GW-Downgradient" = 17,
                   "GW-Upgradient" = 18)
 
-sample_type_experiment_NMDS = Ord_experiment %>%
+# Define the colors for site
+site_colors = c("22354" = "#628b29", 
+                "3586" = "#ffcdbd", 
+                "46001" = "#20a47b", 
+                "13116" = "#ee83b4",
+                "33107" = "#186294", 
+                "25410" = "#c5c5c5", 
+                "35406" = "#83deff", 
+                "22348" = "#eeffc5",
+                "25427" = "#39394a", 
+                "13113" = "#eeca03", 
+                "42195" = "#523910", 
+                "42201" = "#ffeea4", 
+                "33106" = "#eac5ff", 
+                "17481" = "#f69418")
+
+# Define the plots updated with the new color mapping for site
+site_experiment_NMDS = Ord_experiment %>%
   ggplot(aes(x = NMDS1, y = NMDS2)) +
-  geom_point(aes(shape = sample_type, color = site), size = 5) +
-#  geom_text_repel(aes(label = SampleID), size = 3, point.padding = 0.5, max.overlaps = 20) +  # Add Sample IDs as labels
-  scale_color_manual(values = mcolors) +
-#  geom_polygon(aes(fill = site, color = site), alpha = 0.2, linetype = 2, position = "identity", show.legend = FALSE) +  # If needed
-  new_scale_color() +
-  scale_shape_manual(values = shape_values) +
+  geom_point(aes(color = site), size = 5) +
+  scale_color_manual(values = site_colors) +
   theme_bw() +
-  scale_fill_manual(values = mcolors) +
-  labs(title = "Experiment - NMDS Sample Type")
+  labs(title = "Sample ID")
 
-sample_type_experiment_NMDS
+site_experiment_NMDS
 
-#ggsave(sample_type_experiment_NMDS, filename = "CCP_experiment_NMDS_IDs.pdf")
+#ggsave(site_experiment_NMDS, filename = "CCP_experiment_NMDS_SiteID.pdf")
 
 #There is so much site level variation here that we cannot really reasonably do this. We need to split these up, but then we don't have enough samples from each site to make some of these... Let's reformat some of these.
 
+regionmcolors=c("#ffde00", "#62415a", "#c52929","#d58b52")
+
+Ord_experiment=metaMDS(t(asv_table_experiment_df_rel_noPW), distance = "bray", noshare = T, trace = 1, autotransform=T) #make distance matrix
+stressplot(Ord_experiment) #good enough for me.
+
+Ord_experiment = as.data.frame(scores(Ord_experiment)$sites)
+Ord_experiment$sample_type = metadata_table_experiment_df_noPW$sample_type
+Ord_experiment$SampleID = rownames(Ord_experiment)
+Ord_experiment$sample_point = metadata_table_experiment_df_noPW$sample_point
+Ord_experiment$site = metadata_table_experiment_df_noPW$site
+Ord_experiment$region = metadata_table_experiment_df_noPW$region
+
+#lets try this by region.
+region_experiment_NMDS = Ord_experiment %>%
+  ggplot(aes(x = NMDS1, y = NMDS2)) +
+  geom_point(aes(color = region), size = 5) +
+  scale_color_manual(values = regionmcolors) +
+  new_scale_color() +
+  theme_bw() +
+  scale_fill_manual(values = regionmcolors) +
+  labs(title = "Region")
+
+region_experiment_NMDS
+
+#ggsave(region_experiment_NMDS, filename = "CCP_experiment_NMDS_region.pdf")
+
+mcolors=c("#f8766d", "#6a3fff", "#00bfc4", "#c77cff")
+
 #Going to plot these by sample type too just so we can see that they're not different.
-sample_type_experiment_NMDS_v2 = Ord_experiment %>%
+sample_type_experiment_NMDS = Ord_experiment %>%
   ggplot(aes(x = NMDS1, y = NMDS2)) +
   geom_point(aes(color = sample_type), size = 5) +
 #  geom_text_repel(aes(label = SampleID), size = 3, point.padding = 0.5, max.overlaps = 20) +  # Add Sample IDs as labels
@@ -236,12 +345,11 @@ sample_type_experiment_NMDS_v2 = Ord_experiment %>%
   new_scale_color() +
   theme_bw() +
   scale_fill_manual(values = mcolors) +
-  labs(title = "Experiment - ASV NMDS Sample Type")
+  labs(title = "Sample Type")
 
-sample_type_experiment_NMDS_v2
+sample_type_experiment_NMDS
 
-#ggsave(sample_type_experiment_NMDS_v2, file="ASV_sampleType.pdf")
-
+#ggsave(sample_type_experiment_NMDS, file="ASV_sampleType.pdf")
 
 #
 #
@@ -253,16 +361,133 @@ asv_table_experiment_df_min2 = asv_table_experiment_df %>%
   filter(rowSums(. > 0) >= 2)
 
 set.seed(1234)
-indic.asv <- multipatt(t(asv_table_experiment_df_min2), metadata_table_experiment_df$sample_type, duleg = F, func = "r.g", permutations = 9999)
+indic.asv = multipatt(t(asv_table_experiment_df_min2), metadata_table_experiment_df$sample_type, duleg = F, func = "r.g", permutations = 9999)
 
-indic.asv <- indic.asv$sign
-indic.asv$asv_id <- rownames(indic.asv)
-indic.asv$p.fdr <- p.adjust(indic.asv$p.value, method = "fdr")
+indic.asv = indic.asv$sign
+indic.asv$asv_id = rownames(indic.asv)
+indic.asv$p.fdr = p.adjust(indic.asv$p.value, method = "fdr")
 
 # write out results
 #write.csv(indic.chem, "indicator_chem.csv")
 
-# Nope - no go.
+# Nope - no go. Way too many ASVs that are only present in a single sample. Let's try this another way, but first lets do this at the genera level.
+
+#
+#
+#
+# Experiment NMDS and PERMANOVA.
+#
+#
+#
+
+Ord_experiment=metaMDS(t(genera_rollup_experiment_df_rel), distance = "bray", noshare = T, trace = 1, autotransform=T) #make distance matrix
+stressplot(Ord_experiment) #good enough for me.
+
+Ord_experiment = as.data.frame(scores(Ord_experiment)$sites)
+Ord_experiment$sample_type = metadata_table_experiment_df$sample_type
+Ord_experiment$SampleID = rownames(Ord_experiment)
+Ord_experiment$sample_point = metadata_table_experiment_df$sample_point
+Ord_experiment$site = metadata_table_experiment_df$site
+Ord_experiment$region = metadata_table_experiment_df$region
+  
+shape_values = c("Ash Pond Water" = 15,
+                  "CCP Porewater" = 16,
+                  "GW-Downgradient" = 17,
+                  "GW-Upgradient" = 18)
+
+# Define the colors for site
+site_colors = c("22354" = "#628b29", 
+                "3586" = "#ffcdbd", 
+                "46001" = "#20a47b", 
+                "13116" = "#ee83b4",
+                "33107" = "#186294", 
+                "25410" = "#c5c5c5", 
+                "35406" = "#83deff", 
+                "22348" = "#eeffc5",
+                "25427" = "#39394a", 
+                "13113" = "#eeca03", 
+                "42195" = "#523910", 
+                "42201" = "#ffeea4", 
+                "33106" = "#eac5ff", 
+                "17481" = "#f69418")
+
+# Define the plots updated with the new color mapping for site
+site_experiment_NMDS = Ord_experiment %>%
+  ggplot(aes(x = NMDS1, y = NMDS2)) +
+  geom_point(aes(color = site), size = 5) +
+  scale_color_manual(values = site_colors) +
+  theme_bw() +
+  labs(title = "Sample ID")
+
+site_experiment_NMDS
+
+#ggsave(site_experiment_NMDS, filename = "CCP_experiment_NMDS_SiteID_genera.pdf")
+
+#There is so much site level variation here that we cannot really reasonably do this. We need to split these up, but then we don't have enough samples from each site to make some of these... Let's reformat some of these.
+
+regionmcolors=c("#ffde00", "#62415a", "#c52929","#d58b52")
+
+Ord_experiment=metaMDS(t(genera_rollup_experiment_df_rel_noPW), distance = "bray", noshare = T, trace = 1, autotransform=T) #make distance matrix
+stressplot(Ord_experiment) #good enough for me.
+
+Ord_experiment = as.data.frame(scores(Ord_experiment)$sites)
+Ord_experiment$sample_type = metadata_table_experiment_df_noPW$sample_type
+Ord_experiment$SampleID = rownames(Ord_experiment)
+Ord_experiment$sample_point = metadata_table_experiment_df_noPW$sample_point
+Ord_experiment$site = metadata_table_experiment_df_noPW$site
+Ord_experiment$region = metadata_table_experiment_df_noPW$region
+
+#lets try this by region.
+region_experiment_NMDS = Ord_experiment %>%
+  ggplot(aes(x = NMDS1, y = NMDS2)) +
+  geom_point(aes(color = region), size = 5) +
+  scale_color_manual(values = regionmcolors) +
+  new_scale_color() +
+  theme_bw() +
+  scale_fill_manual(values = regionmcolors) +
+  labs(title = "Region")
+
+region_experiment_NMDS
+
+#ggsave(region_experiment_NMDS, filename = "CCP_experiment_NMDS_region_genera.pdf")
+
+mcolors=c("#f8766d", "#6a3fff", "#00bfc4", "#c77cff")
+
+#Going to plot these by sample type too just so we can see that they're not different.
+sample_type_experiment_NMDS = Ord_experiment %>%
+  ggplot(aes(x = NMDS1, y = NMDS2)) +
+  geom_point(aes(color = sample_type), size = 5) +
+#  geom_text_repel(aes(label = SampleID), size = 3, point.padding = 0.5, max.overlaps = 20) +  # Add Sample IDs as labels
+  scale_color_manual(values = mcolors) +
+#  geom_polygon(aes(fill = site, color = site), alpha = 0.2, linetype = 2, position = "identity", show.legend = FALSE) +  # If needed
+  new_scale_color() +
+  theme_bw() +
+  scale_fill_manual(values = mcolors) +
+  labs(title = "Sample Type")
+
+sample_type_experiment_NMDS
+
+#ggsave(sample_type_experiment_NMDS, file="genera_sampleType_genera.pdf")
+
+#
+#
+## It looks like generas at a community level are not significantly different. However, I bet there are a handful of generas that would fall out of an indicator analysis for some of the treatments. lets see if any generas are indicators of treatments, and whether those genera taxonomies are unique.
+#
+#
+
+genera_table_experiment_df_min2 = genera_rollup_experiment_df_rel %>%
+  filter(rowSums(. > 0) >= 2)
+
+set.seed(1234)
+indic.genera = multipatt(t(genera_table_experiment_df_min2), metadata_table_experiment_df$sample_type, duleg = F, func = "r.g", permutations = 9999)
+
+indic.genera = indic.genera$sign
+indic.genera$genera_id = rownames(indic.genera)
+indic.genera$p.fdr = p.adjust(indic.genera$p.value, method = "fdr")
+
+# Nada
+
+
 
 #Alright, so it looks like these communities are just not that different at a microbial level at a sample type - level, which is interesting and would suggest that treatments are working. However, ASVs are different at the site level which is interesting, i'll address those in the section below. For now, let's just make a heatmap here that will showcase this the easiest at a genera-level.
 
@@ -272,31 +497,31 @@ genera_rollup_experiment_heatmap_df = genera_rollup_experiment_df %>%
 #There's a whole bunch of genera here that are super low abundance. So lets just make this cleaner by plotting only those genera that have more than 0.5% of total abundance. Random cutoff.
 
 # Step 1: Calculate the total abundance for each genus
-genera_totals <- rowSums(genera_rollup_experiment_heatmap_df[, -1])
+genera_totals = rowSums(genera_rollup_experiment_heatmap_df[, -1])
 
 # Step 2: Calculate the threshold for 0.5% of the overall population
-total_abundance <- sum(genera_totals)
-threshold <- total_abundance * 0.005
+total_abundance = sum(genera_totals)
+threshold = total_abundance * 0.005
 
 # Step 3: Separate the genera that are above the threshold and those that are below it
-above_threshold <- genera_rollup_experiment_heatmap_df[genera_totals >= threshold, ]
-below_threshold <- genera_rollup_experiment_heatmap_df[genera_totals < threshold, ]
+above_threshold = genera_rollup_experiment_heatmap_df[genera_totals >= threshold, ]
+below_threshold = genera_rollup_experiment_heatmap_df[genera_totals < threshold, ]
 
 # Step 4: Sum the abundance of the below-threshold genera by column
-below_threshold_sum <- colSums(below_threshold[, -1])
+below_threshold_sum = colSums(below_threshold[, -1])
 
 # Step 5: Create a new row for the aggregated below-threshold genera
-new_row <- data.frame(genera_id = "under 0.5% of abundance", t(below_threshold_sum))
-colnames(new_row) <- colnames(genera_rollup_experiment_heatmap_df)
+new_row = data.frame(genera_id = "under 0.5% of abundance", t(below_threshold_sum))
+colnames(new_row) = colnames(genera_rollup_experiment_heatmap_df)
 
 # Ensure both data frames have the same column names and types
-above_threshold <- as.data.frame(above_threshold)
-new_row <- as.data.frame(new_row)
+above_threshold = as.data.frame(above_threshold)
+new_row = as.data.frame(new_row)
 
 # Step 6: Combine the above-threshold genera with the new row
-filtered_genera_df <- rbind(above_threshold, new_row)
+filtered_genera_df = rbind(above_threshold, new_row)
 
-rownames(filtered_genera_df) <- NULL #remove the rownames so i can bring in the genera again
+rownames(filtered_genera_df) = NULL #remove the rownames so i can bring in the genera again
 
 filtered_genera_df_pheatmap = filtered_genera_df %>%
   column_to_rownames(var="genera_id")
@@ -315,18 +540,18 @@ filtered_genera_df_pheatmap_noLow_rel = filtered_genera_df_pheatmap_noLow %>%
 #Alright, now i'm going to plot the IDs that make the most sense (site IDs), alongisde the sample types that they belong to. Going to do a pivot here.
 
 # Ensure metadata is properly aligned with the heatmap data columns
-metadata_table_experiment_df <- metadata_table_experiment_df[colnames(filtered_genera_df_pheatmap_noLow_rel), ]
+metadata_table_experiment_df = metadata_table_experiment_df[colnames(filtered_genera_df_pheatmap_noLow_rel), ]
 
 # Create an annotation dataframe for columns including both 'sample_type' and 'site'
-annotation_col <- metadata_table_experiment_df[, c("sample_type", "site"), drop = FALSE]
+annotation_col = metadata_table_experiment_df[, c("sample_type", "site"), drop = FALSE]
 
 # Define colors for each group
-group_colors <- list(
+group_colors = list(
   sample_type = c(
     "GW-Downgradient" = "#00bfc4",
     "GW-Upgradient" = "#c77cff",
     "Ash Pond Water" = "#f8766d",
-    "CCP Porewater" = "#7cae00"
+    "CCP Porewater" = "#6a3fff"
   ),
   site = c(
     "22354" = "#628b29", "3586" = "#ffcdbd", "46001" = "#20a47b", "13116" = "#ee83b4",
@@ -337,10 +562,10 @@ group_colors <- list(
 )
 
 # Ensure annotation row names match the column names of the heatmap data
-rownames(annotation_col) <- colnames(filtered_genera_df_pheatmap_noLow_rel)
+rownames(annotation_col) = colnames(filtered_genera_df_pheatmap_noLow_rel)
 
 # Save the pheatmap as a PDF
-pdf("pheatmap_output_v0.pdf", width = 10, height = 8)  # You can adjust the width and height as needed
+#pdf("pheatmap_output_v0.pdf", width = 10, height = 8)  # You can adjust the width and height as needed
 
 pheatmap(
   filtered_genera_df_pheatmap_noLow_rel,
@@ -352,21 +577,416 @@ pheatmap(
   annotation_colors = group_colors
 )
 
-dev.off()  # Close the PDF device
+#dev.off()  # Close the PDF device
 
-variables_to_keep = c("asv_taxonomy", "asv_table_controls_df", "asv_table_experiment_df", "metadata_table_control_df", "metadata_table_experiment_df", "chemistry_df_final", "genera_rollup_experiment_df")
+####################
 
-rm(list=setdiff(ls(), variables_to_keep)) #clean out the environment. 
+#Let's do some quick richness and other diversity metric calculations here.
+calculate_richness = function(otu_table) {
+  colSums(otu_table > 0)
+}
+
+richness_asvs = calculate_richness(asv_table_experiment_df) %>%
+  as.data.frame() %>%
+  dplyr::rename(richness = ".") %>%
+  rownames_to_column(var="sample_id")
+
+shannon_diversity = diversity(t(asv_table_experiment_df), index = "shannon") %>%
+  as.data.frame() %>%
+  dplyr::rename(shannons = ".") %>%
+  rownames_to_column(var="sample_id")
+
+simpson_diversity = diversity(t(asv_table_experiment_df), index = "simpson") %>%
+  as.data.frame() %>%
+  dplyr::rename(simpson = ".") %>%
+  rownames_to_column(var="sample_id")
+
+library(phyloseq)
+# Convert to a phyloseq object
+asv_otutable = otu_table(asv_table_experiment_df, taxa_are_rows = TRUE)
+physeq = phyloseq(asv_otutable)
+chao1_richness = estimate_richness(physeq, measures = "Chao1") %>%
+  rownames_to_column(var="sample_id")
+
+#Now lets merge that to the metadata
+richness_per_metadat = metadata_table_experiment_df %>%
+  rownames_to_column(var="sample_id") %>%
+  left_join(richness_asvs, by="sample_id") %>%
+  left_join(shannon_diversity, by="sample_id") %>%
+  left_join(simpson_diversity, by="sample_id") %>%
+  left_join(chao1_richness, by="sample_id")
+
+# Create plot
+richness_plots = ggplot(richness_per_metadat, aes(x = sample_type, y = richness, fill = sample_type)) +
+  geom_boxplot() +
+  labs(title = "Richness", x = "Sample type", y = "Richness (Number of Unique ASVs)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12)) + 
+  scale_fill_manual(values = mcolors)
+
+shannon_plots = ggplot(richness_per_metadat, aes(x = sample_type, y = shannons, fill = sample_type)) +
+  geom_boxplot() +
+  labs(title = "Shannon's", x = "Sample type", y = "Shannon's") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12)) + 
+  scale_fill_manual(values = mcolors)
+
+simpson_plots = ggplot(richness_per_metadat, aes(x = sample_type, y = simpson, fill = sample_type)) +
+  geom_boxplot() +
+  labs(title = "Simpson", x = "Sample type", y = "Simpson") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12)) + 
+  scale_fill_manual(values = mcolors)
+
+chao1_plots = ggplot(richness_per_metadat, aes(x = sample_type, y = Chao1, fill = sample_type)) +
+  geom_boxplot() +
+  labs(title = "Chao1", x = "Sample type", y = "Chao1") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12)) + 
+  scale_fill_manual(values = mcolors)
+   
+combined_richness_per_sampletype = richness_plots + shannon_plots + simpson_plots + chao1_plots
+combined_richness_per_sampletype
+#ggsave(combined_richness_per_sampletype, file="all_richness_per_sampleType.pdf", height = 13, width = 10)
+
+#Now i want to do this for the site-level results of the sites we have enough data from to do it on. So subsetting here, i'll do this again below but for now.
+
+richness_per_metadat_finalSites = richness_per_metadat %>%
+  column_to_rownames(var="sample_id") %>%
+  as.data.frame() %>%
+  t() %>%
+  as.data.frame() %>%
+  select(-c(S27, S26, S62, S34, S60, S6, S68, S76, S77, S75, S74, S73, S64, S45, S47, S49, S51, S53, S55, S59, S81, S82, S83, S84, S31, S32, S29, S30, S36, S38, S39, S42, S41, S43)) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(var="sample_id")
+
+    # Create plot
+richness_perSite = ggplot(richness_per_metadat_finalSites, aes(x = site, y = as.numeric(richness), fill = site)) +
+  geom_boxplot() +
+  labs(title = "Richness", x = "Sample type", y = "Richness (Number of Unique ASVs)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12)) + 
+  scale_fill_manual(values = mcolors) 
+
+shannon_perSite = ggplot(richness_per_metadat_finalSites, aes(x = site, y = as.numeric(shannons), fill = site)) +
+  geom_boxplot() +
+  labs(title = "Shannon's", x = "Sample type", y = "Shannon's") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12)) + 
+  scale_fill_manual(values = mcolors)
+
+simpson_perSite = ggplot(richness_per_metadat_finalSites, aes(x = site, y = as.numeric(simpson), fill = site)) +
+  geom_boxplot() +
+  labs(title = "Simpson", x = "Sample type", y = "Simpson") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12)) + 
+  scale_fill_manual(values = mcolors)
+
+chao1_perSite = ggplot(richness_per_metadat_finalSites, aes(x = site, y = as.numeric(Chao1), fill = site)) +
+  geom_boxplot() +
+  labs(title = "Chao1", x = "Sample type", y = "Chao1") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12)) + 
+  scale_fill_manual(values = mcolors)
+
+combined_richness_per_site = richness_perSite + shannon_perSite + simpson_perSite + chao1_perSite
+combined_richness_per_site
+#ggsave(combined_richness_per_site, file="all_richness_per_site_agg.pdf", height=13, width=13)
+
+#I have a strong suspicion that most of these ASVs are only in a single sample because the sample collections were fairly disparate. If we want to detect site level differences and things at a smaller scale, we need to re-assess how we sampled them. I'm going to try and prove that this is the case
+
+#First, lets just count how many ASVs are only in a single sample.
+
+# 1. Calculate how many ASVs are present only in a single sample
+unique_asvs = asv_table_experiment_df_rel %>%
+  mutate(row_sum = rowSums(. != 0)) %>%
+  filter(row_sum == 1) %>%
+  nrow()
+
+# Print the number of unique ASVs
+print(paste("Number of unique ASVs present in only one sample:", unique_asvs))
+
+zero_asvs = asv_table_experiment_df_rel %>%
+  filter(rowSums(.) == 0) %>%
+  nrow()
+
+# Print the number of ASVs that have zero abundance across all samples
+print(paste("Number of ASVs with zero abundance across all samples:", zero_asvs))
+
+# 2. Aggregate ASV abundances by SITE level
+# First, transpose the ASV table to have sample IDs as rows
+asv_table_t = as.data.frame(t(asv_table_experiment_df_rel))
+
+# Add a column for Sample IDs
+asv_table_t = tibble::rownames_to_column(asv_table_t, "SampleID")
+
+metadata_table_experiment_df_merge = metadata_table_experiment_df %>%
+  rownames_to_column(var="SampleID")
+
+# Merge with metadata to get site information
+merged_data = merge(asv_table_t, metadata_table_experiment_df_merge, by = "SampleID")
+
+# Aggregate all ASV abundances by SITE
+aggregated_data_ASVs = merged_data %>%
+  select(-c(1, 50645:50650, 50652:50655)) %>%
+  select(site, everything()) %>%
+  group_by(site) %>%
+  summarise(across(everything(), sum, na.rm = TRUE)) %>%
+  column_to_rownames(var="site") %>%
+  t() %>%
+  as.data.frame()
+
+# Now, lets just count how many ASVs are only in a single site.
+unique_asvs_site = aggregated_data_ASVs %>%
+  mutate(row_sum = rowSums(. != 0)) %>%
+  filter(row_sum == 1) %>%
+  nrow()
+
+# Print the number of unique ASVs
+print(paste("Number of unique ASVs present in only one SITE:", unique_asvs_site))
+
+##
+##
+##
+##
+##
+
+#Now, let me try doing a similar thing but for genera-level aggregations as opposed to ASVs. From here, we can maybe get some taxonomic info of what is unique / distributed.
+
+# 1. Calculate how many genera are present only in a single sample
+unique_genera = genera_rollup_experiment_df %>%
+  mutate(row_sum = rowSums(. != 0)) %>%
+  filter(row_sum == 1) %>%
+  nrow()
+
+#write.csv(genera_rollup_experiment_df, file="genera_sample_SITES.csv")
+
+# Print the number of unique genera
+print(paste("Number of unique genera present in only one sample:", unique_genera))
+
+zero_genera = genera_rollup_experiment_df %>%
+  filter(rowSums(.) == 0) %>%
+  nrow()
+
+# Print the number of genera that have zero abundance across all samples
+print(paste("Number of genera with zero abundance across all samples:", zero_genera))
+
+# 2. Aggregate genera abundances by SITE level
+# First, transpose the genera table to have sample IDs as rows
+genera_table_t = as.data.frame(t(genera_rollup_experiment_df))
+
+# Add a column for Sample IDs
+genera_table_t = tibble::rownames_to_column(genera_table_t, "SampleID")
+
+metadata_table_experiment_df_merge = metadata_table_experiment_df %>%
+  rownames_to_column(var="SampleID")
+
+# Merge with metadata to get site information
+merged_data_genera = merge(genera_table_t, metadata_table_experiment_df_merge, by = "SampleID")
+
+# Aggregate all genera abundances by SITE
+aggregated_data_genera = merged_data_genera %>%
+  select(-c(1, 3409:3414, 3416:3419)) %>%
+  select(site, everything()) %>%
+  group_by(site) %>%
+  summarise(across(everything(), sum, na.rm = TRUE)) %>%
+  column_to_rownames(var="site") %>%
+  t() %>%
+  as.data.frame()
+
+# Now, lets just count how many genera are only in a single site.
+unique_genera_site = aggregated_data_genera %>%
+  mutate(row_sum = rowSums(. != 0)) %>%
+  filter(row_sum == 1) %>%
+  nrow()
+
+# Print the number of unique genera
+print(paste("Number of unique genera present in only one SITE:", unique_genera_site))
+
+#write.csv(aggregated_data_with_counts, file="genera_site_aggregations.csv")
+
+merged_data_acrossTypes_genera = merged_data_genera %>%
+  select(-c(3409:3416, 3418:3419))
+
+# Step 1: Change "Ash pond" to "CCP Porewater" in the sample_type column
+merged_data_acrossTypes_genera = merged_data_acrossTypes_genera %>%
+  mutate(sample_type = case_when(
+    sample_type == 'Ash Pond Water' ~ 'CCP Porewater',
+    TRUE ~ sample_type
+  ))
+
+# Step 2: Identify genera that are present across all sample types
+
+# First, we need to melt the data frame to long format to make it easier to handle
+genera_df_long = merged_data_acrossTypes_genera %>%
+  pivot_longer(cols = 2:3408, names_to = "genera", values_to = "abundance")
+
+# Required sample types
+required_sample_types = c('GW-Downgradient', 'GW-Upgradient', 'CCP Porewater')
+
+# Filter out genera that are present in all required sample types
+genera_in_all_sample_types = genera_df_long %>%
+  filter(abundance > 0) %>%
+  group_by(genera) %>%
+  summarise(n_sample_types = n_distinct(sample_type[sample_type %in% required_sample_types])) %>%
+  filter(n_sample_types == length(required_sample_types)) %>%
+  pull(genera)
+
+# Filter the dataframe to retain only selected genera
+genera_in_all_sample_types_filtered_df = genera_df_long %>%
+  filter(genera %in% genera_in_all_sample_types)
+
+metadata_table_experiment_df_SAMPLETYPES = metadata_table_experiment_df_merge %>%
+  select(c(SampleID, sample_type, pivot_id))
+  
+# Create an OTU table
+genera_table = genera_in_all_sample_types_filtered_df %>%
+  group_by(genera, SampleID) %>%
+  summarize(total_abundance = sum(abundance), .groups = 'drop') %>%
+  pivot_wider(names_from = SampleID, values_from = total_abundance, values_fill = list(total_abundance = 0)) %>%
+  column_to_rownames(var="genera") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(var="SampleID") %>%
+  left_join(metadata_table_experiment_df_SAMPLETYPES, by="SampleID") %>%
+  select(SampleID, sample_type, pivot_id, everything())
+
+#write.csv(genera_table, file="genera_table_allSampleTypes.csv")
+
+# Convert your data frame to a matrix excluding the first two columns (SampleID and sample_type)
+genera_matrix = as.matrix(genera_table[, -c(1, 2, 3)])
+
+# Perform NMDS ordination using Bray-Curtis distance
+nmds_ubi_genera = metaMDS(genera_matrix, distance = "bray", k = 2, noshare = 0.1, trace = 1, trymax = 999, autotransform = TRUE)
+
+stressplot(nmds_ubi_genera) # Check NMDS stress plot
+
+# Create a data frame for NMDS results
+nmds_data = as.data.frame(nmds_ubi_genera$points)
+
+# Add SampleID and sample_type to the NMDS results data frame
+nmds_data$SampleID = genera_table$SampleID
+nmds_data$sample_type = genera_table$sample_type
+nmds_data$pivot_id = genera_table$pivot_id
+
+nmds_data = nmds_data %>%
+  mutate(sample_type = case_when(
+    sample_type == 'Ash Pond Water' ~ 'CCP Porewater',
+    TRUE ~ sample_type
+  ))
+
+
+# Plot NMDS results using ggplot2
+facet_plots_genera = ggplot(nmds_data, aes(x = MDS1, y = MDS2, color = sample_type, label = SampleID)) +
+  geom_point(size = 3) +
+  labs(title = "NMDS Ordination of Genera in present across all Sample Types", x = "NMDS1", y = "NMDS2") +
+  theme(legend.position = "right") +
+  facet_wrap(~ pivot_id)
+
+facet_plots_genera 
+
+nmds_data_subset_SITES = nmds_data %>%
+  filter(pivot_id %in% c("17481", "22354", "3586", "46001"))
+  
+# Plot NMDS results using ggplot2
+facet_plots_genera = ggplot(nmds_data_subset_SITES, aes(x = MDS1, y = MDS2, color = sample_type, label = SampleID)) +
+  geom_point(size = 3) +
+  labs(title = "NMDS Ordination of Genera in present across all Sample Types", x = "NMDS1", y = "NMDS2") +
+  theme(legend.position = "right") +
+  facet_wrap(~ pivot_id)
+
+facet_plots_genera
+
+#ggsave(facet_plots_genera, file="facet_genera_NMDS_consistent.pdf")
+
+##
+##
+##
+##
+##
+##
+##
+
+#Let's do some additional analyses here real quick regarding occupancy.
+#Let's plot this out for ASVs first
+
+aggregated_ASV_data_with_counts = aggregated_data_ASVs %>%
+  mutate(Sample_Count = rowSums(. != 0))
+
+# Filter out ASVs with occupancy of zero
+filtered_ASVs_df = aggregated_ASV_data_with_counts %>%
+  filter(Sample_Count > 0)
+
+# Create a summary table that counts the number of genera for each Sample_Count value
+occupancy_summary = filtered_ASVs_df %>%
+  group_by(Sample_Count) %>%
+  summarise(Num_ASVs = n())
+
+# Create the bar plot
+ASVs_occupancy_plot = ggplot(occupancy_summary, aes(x = Sample_Count, y = Num_ASVs)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Number of ASVs Found in X Number of Samples",
+       x = "Number of Samples",
+       y = "Number of ASVs") +
+  scale_x_continuous(breaks = seq(min(occupancy_summary$Sample_Count), max(occupancy_summary$Sample_Count), by = 1)) +
+  theme_minimal()
+
+ASVs_occupancy_plot
+
+#ggsave(ASVs_occupancy_plot, file="ASV_occupancy.pdf")
+
+##
+##
+##
+
+#Let's plot this out for genera now
+#Let me just make this table to see if i can make sense of any orgs here and highlight a handful.
+
+aggregated_data_with_counts = aggregated_data_genera %>%
+  mutate(Sample_Count = rowSums(. != 0))
+
+# Filter out genera with occupancy of zero
+filtered_genera_df = aggregated_data_with_counts %>%
+  filter(Sample_Count > 0)
+
+# Create a summary table that counts the number of genera for each Sample_Count value
+occupancy_summary = filtered_genera_df %>%
+  group_by(Sample_Count) %>%
+  summarise(Num_Genera = n())
+
+# Create the bar plot
+genera_occupancy_plot = ggplot(occupancy_summary, aes(x = Sample_Count, y = Num_Genera)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Number of Genera Found in X Number of Samples",
+       x = "Number of Samples",
+       y = "Number of Genera") +
+  scale_x_continuous(breaks = seq(min(occupancy_summary$Sample_Count), max(occupancy_summary$Sample_Count), by = 1)) +
+  theme_minimal()
+
+genera_occupancy_plot
+
+#ggsave(genera_occupancy_plot, file="genera_occupancy.pdf")
+
+#Alright now lets dig into the genera that were shared across and see if I can see any patterns here.
+
+high_occupancy_genera = c("Reyranella", "Phenylobacterium", "Nitrospira D", "Shewanella", 
+                    "Pseudomonas", "UBA9655", "Limnobacter", "Parvibaculum", "Afipia", "SYFT01")
 
 ```
 
-```{r Site-level statistics - OTUs}
+```{r Site-level statistics - OTUs & Genera}
 
 #Let's start sectioning out which sites have enough samples to look at these patterns.
 asv_table_experiment_df_SITES_rel = asv_table_experiment_df %>%
   select(-c(S27, S26, S62, S34, S60, S6, S68, S76, S77)) %>%
   mutate(across(everything(), ~ . / sum(.)))
   
+#Let's start sectioning out which sites have enough samples to look at these patterns.
+genera_table_experiment_df_SITES_rel = genera_rollup_experiment_df %>%
+  select(-c(S27, S26, S62, S34, S60, S6, S68, S76, S77)) %>%
+  mutate(across(everything(), ~ . / sum(.)))
+
 metadata_table_experiment_df_SITES = metadata_table_experiment_df %>%
   filter(!grepl("13116", site)) %>%
   filter(!grepl("25410", site)) %>%
@@ -374,56 +994,64 @@ metadata_table_experiment_df_SITES = metadata_table_experiment_df %>%
   filter(!grepl("42195", site)) %>%
   filter(!grepl("42201", site))
 
-#Super loosey-goosey here. Let's just run an nmds. I know the stress is off. And i know i need to further filter. But just to show Kitt.
+#Super loosey-goosey here. Let's just run an nmds. I know the stress is off. And i know i need to further filter.
 
 # Function to perform metaMDS per site
-run_metaMDS <- function(df, metadata, site_column) {
-  sites <- unique(metadata[[site_column]])
-  nmds_list <- list()
+run_metaMDS = function(df, metadata, site_column) {
+  sites = unique(metadata[[site_column]])
+  nmds_list = list()
   
   for (site in sites) {
     # Filter ASV table and metadata for the current site
-    site_asv <- df[, metadata[[site_column]] == site, drop = FALSE]
-    site_metadata <- metadata[metadata[[site_column]] == site, ]
+    site_asv = df[, metadata[[site_column]] == site, drop = FALSE]
+    site_metadata = metadata[metadata[[site_column]] == site, ]
     
     # Ensure there are columns/rows to process
     if (ncol(site_asv) > 1 && nrow(site_metadata) > 1) {
       # Calculate NMDS
-      nmds_result <- metaMDS(t(site_asv), distance = "bray", noshare = TRUE, trace = 1, autotransform = TRUE)
+      nmds_result = metaMDS(t(site_asv), distance = "bray", noshare = TRUE, trace = 1, autotransform = TRUE)
       
       # Extract scores and add metadata
-      scores_df <- as.data.frame(scores(nmds_result)$sites)
+      scores_df = as.data.frame(scores(nmds_result)$sites)
       scores_df$sample_type = site_metadata$sample_type
       scores_df$SampleID = rownames(scores_df)
       scores_df$sample_point = site_metadata$sample_point
       scores_df$site = site
-      
+      scores_df$region = site_metadata$region
+
       # Append to list
-      nmds_list[[site]] <- scores_df
+      nmds_list[[site]] = scores_df
     }
   }
   
   # Combine all NMDS results into one data frame
-  combined_nmds_df <- do.call(rbind, nmds_list)
+  combined_nmds_df = do.call(rbind, nmds_list)
   
   return(combined_nmds_df)
 }
 
 # Split data and run metaMDS for each site
-combined_nmds_df <- run_metaMDS(asv_table_experiment_df_SITES_rel, metadata_table_experiment_df_SITES, "site")
+combined_nmds_df = run_metaMDS(asv_table_experiment_df_SITES_rel, metadata_table_experiment_df_SITES, "site")
+
 # Define custom colors and shapes
 mcolors = c("#628b29", "#ffcdbd", "#e66294", "#2F9DA1", "#FF5F5F", "#c5c5c5", 
             "#83deff", "#eeffc5", "#39394a", "#eeca03", "#523910", "#ffeea4", "#944abd", "#f69418")
 
-shape_values <- c("Ash Pond Water" = 15,
+shape_values = c("Ash Pond Water" = 15,
                   "CCP Porewater" = 16,
                   "GW-Downgradient" = 17,
                   "GW-Upgradient" = 18)
 
+combined_nmds_df = combined_nmds_df %>%
+  mutate(sample_type = case_when(
+    sample_type == 'Ash Pond Water' ~ 'CCP Porewater',
+    TRUE ~ sample_type
+  ))
+
 # Create faceted NMDS plot
 sample_type_experiment_NMDS = combined_nmds_df %>%
   ggplot(aes(x = NMDS1, y = NMDS2)) +
-  geom_point(aes(shape = sample_type, color = site), size = 5) +
+  geom_point(aes(shape = sample_type, color = sample_type), size = 5) +
   scale_color_manual(values = mcolors) +
   new_scale_color() +
   scale_shape_manual(values = shape_values) +
@@ -435,14 +1063,48 @@ sample_type_experiment_NMDS = combined_nmds_df %>%
 # Print plot
 print(sample_type_experiment_NMDS)
 
+#ggsave(sample_type_experiment_NMDS, file = "sample_type_subset_NMDS.pdf")
+
+# Split data and run metaMDS for each site
+combined_nmds_df_genera = run_metaMDS(genera_table_experiment_df_SITES_rel, metadata_table_experiment_df_SITES, "site")
+
+# Define custom colors and shapes
+mcolors = c("#628b29", "#ffcdbd", "#e66294", "#2F9DA1", "#FF5F5F", "#c5c5c5", 
+            "#83deff", "#eeffc5", "#39394a", "#eeca03", "#523910", "#ffeea4", "#944abd", "#f69418")
+
+shape_values = c("Ash Pond Water" = 15,
+                  "CCP Porewater" = 16,
+                  "GW-Downgradient" = 17,
+                  "GW-Upgradient" = 18)
+
+# Create faceted NMDS plot
+sample_type_experiment_NMDS_genera = combined_nmds_df_genera %>%
+  ggplot(aes(x = NMDS1, y = NMDS2)) +
+  geom_point(aes(shape = sample_type, color = site), size = 5) +
+  scale_color_manual(values = mcolors) +
+  new_scale_color() +
+  scale_shape_manual(values = shape_values) +
+  theme_bw() +
+  scale_fill_manual(values = mcolors) +
+  labs(title = "Experiment - NMDS Sample Type by Site (Genera)") +
+  facet_wrap(~site)  # Facet by site
+
+# Print plot
+print(sample_type_experiment_NMDS_genera)
+
+
 #Now let's do this right for the sites we do have enough data from:
 asv_table_experiment_df_SITES_FINAL_rel = asv_table_experiment_df %>%
   select(-c(S27, S26, S62, S34, S60, S6, S68, S76, S77, S75, S74, S73, S64, S45, S47, S49, S51, S53, S55, S59, S81, S82, S83, S84, S31, S32, S29, S30, S36, S38, S39, S42, S41, S43)) %>%
   mutate(across(everything(), ~ . / sum(.)))
 
-sites_of_interest <- c("3586", "17481", "22354", "46001")
+genera_table_experiment_df_SITES_FINAL_rel = genera_rollup_experiment_df_rel %>%
+  select(-c(S27, S26, S62, S34, S60, S6, S68, S76, S77, S75, S74, S73, S64, S45, S47, S49, S51, S53, S55, S59, S81, S82, S83, S84, S31, S32, S29, S30, S36, S38, S39, S42, S41, S43)) %>%
+  mutate(across(everything(), ~ . / sum(.)))
 
-metadata_table_experiment_df_SITES_FINAL <- metadata_table_experiment_df %>%
+sites_of_interest = c("3586", "17481", "22354", "46001")
+
+metadata_table_experiment_df_SITES_FINAL = metadata_table_experiment_df %>%
   filter(site %in% sites_of_interest)
 
 # Alright lets go:
@@ -452,6 +1114,14 @@ dm.asv_FINAL=calc_dm(asv_table_experiment_df_SITES_FINAL_rel, method = "bray")
 adonis2(formula = dm.asv_FINAL ~ sample_type, data = metadata_table_experiment_df_SITES_FINAL, permutations = 999)
 adonis2(formula = dm.asv_FINAL ~ site, data = metadata_table_experiment_df_SITES_FINAL, permutations = 999)
 
+#Remove specified columns from rel abund
+asv_table_experiment_df_SITES_FINAL_rel_noPW = asv_table_experiment_df_SITES_FINAL_rel[ , !(names(asv_table_experiment_df_SITES_FINAL_rel) %in% PW_samples)]
+
+metadata_table_experiment_df_SITES_FINAL_noPW = metadata_table_experiment_df_SITES_FINAL[!(metadata_table_experiment_df_SITES_FINAL$sample_num %in% PW_samples_nums), ]
+
+dm.FINALSITE_experiment_noPW=calc_dm(asv_table_experiment_df_SITES_FINAL_rel_noPW, method = "bray")
+adonis2(dm.FINALSITE_experiment_noPW ~ region, data = metadata_table_experiment_df_SITES_FINAL_noPW, permutations = 999)
+
 Ord_experiment_FINAL=metaMDS(t(asv_table_experiment_df_SITES_FINAL_rel), distance = "bray", noshare = T, trace = 1, autotransform=T) #make distance matrix
 stressplot(Ord_experiment_FINAL) #looks fine
 
@@ -460,11 +1130,14 @@ Ord_experiment_FINAL$sample_type = metadata_table_experiment_df_SITES_FINAL$samp
 Ord_experiment_FINAL$SampleID = rownames(Ord_experiment_FINAL)
 Ord_experiment_FINAL$sample_point = metadata_table_experiment_df_SITES_FINAL$sample_point
 Ord_experiment_FINAL$site = metadata_table_experiment_df_SITES_FINAL$site
+Ord_experiment_FINAL$region = metadata_table_experiment_df_SITES_FINAL$region
+
+mcolors = c("#f69418", "#628b29", "#ffcdbd", "#20a47b")
 
 sample_type_experiment_NMDS_FINAL = Ord_experiment_FINAL %>%
   ggplot(aes(x = NMDS1, y = NMDS2)) +
   geom_point(aes(shape = sample_type, color = site), size = 5) +
-#  geom_text_repel(aes(label = SampleID), size = 3, point.padding = 0.5, max.overlaps = 20) +  # Add Sample IDs as labels
+  #geom_text_repel(aes(label = SampleID), size = 3, point.padding = 0.5, max.overlaps = 20) +  # Add Sample IDs as labels
   scale_color_manual(values = mcolors) +
 #  geom_polygon(aes(fill = site, color = site), alpha = 0.2, linetype = 2, position = "identity", show.legend = FALSE) +  # If needed
   new_scale_color() +
@@ -475,6 +1148,27 @@ sample_type_experiment_NMDS_FINAL = Ord_experiment_FINAL %>%
 
 sample_type_experiment_NMDS_FINAL
 
+#ggsave(sample_type_experiment_NMDS_FINAL, file = "nmds_sampletype.pdf")
+
+regionmcolors=c("#ffde00", "#c52929","#d58b52")
+
+region_experiment_NMDS_FINAL = Ord_experiment_FINAL %>%
+  ggplot(aes(x = NMDS1, y = NMDS2)) +
+  geom_point(aes(shape = sample_type, color = region), size = 5) +
+  #geom_text_repel(aes(label = SampleID), size = 3, point.padding = 0.5, max.overlaps = 20) +  # Add Sample IDs as labels
+  scale_color_manual(values = regionmcolors) +
+#  geom_polygon(aes(fill = site, color = site), alpha = 0.2, linetype = 2, position = "identity", show.legend = FALSE) +  # If needed
+  new_scale_color() +
+  scale_shape_manual(values = shape_values) +
+  theme_bw() +
+  scale_fill_manual(values = mcolors) +
+  labs(title = "Experiment - NMDS Region")
+
+region_experiment_NMDS_FINAL
+
+#ggsave(region_experiment_NMDS_FINAL, file = "nmds_region.pdf")
+
+
 #
 #
 #
@@ -484,7 +1178,138 @@ sample_type_experiment_NMDS_FINAL
 #
 
 # Split data and run metaMDS for each site
-combined_nmds_df_FINAL <- run_metaMDS(asv_table_experiment_df_SITES_FINAL_rel, metadata_table_experiment_df_SITES_FINAL, "site")
+combined_nmds_df_FINAL = run_metaMDS(asv_table_experiment_df_SITES_FINAL_rel, metadata_table_experiment_df_SITES_FINAL, "site")
+
+# Create faceted NMDS plot
+sample_type_experiment_NMDS_FINAL = combined_nmds_df_FINAL %>%
+  ggplot(aes(x = NMDS1, y = NMDS2)) +
+  geom_point(aes(shape = sample_type, color = sample_type), size = 5) +
+  scale_color_manual(values = mcolors) +
+  new_scale_color() +
+  scale_shape_manual(values = shape_values) +
+  theme_bw() +
+  scale_fill_manual(values = mcolors) +
+  labs(title = "Experiment - NMDS Sample Type by Site") +
+  facet_wrap(~site)  # Facet by site
+
+# Print plot
+print(sample_type_experiment_NMDS_FINAL)
+
+#ggsave(sample_type_experiment_NMDS_FINAL, file = "NMDS_subset_short.pdf")
+
+#Here we go. I think there is a significant trend here for 46001. Run the stats:
+
+# Function to perform adonis2 per site
+run_adonis2_per_site = function(df, metadata, site_column, sample_type_column) {
+  sites = unique(metadata[[site_column]])
+  adonis2_results = list()
+  
+  for (site in sites) {
+    # Filter ASV table and metadata for the current site
+    site_asv = df[, metadata[[site_column]] == site, drop = FALSE]
+    site_metadata = metadata[metadata[[site_column]] == site, ]
+    
+    # Ensure there are columns/rows to process
+    if (ncol(site_asv) > 1 && nrow(site_metadata) > 1) {
+      # Calculate Bray-Curtis distance matrix
+      dm = vegdist(t(site_asv), method = "bray")
+      
+      # Run adonis2
+      adonis2_result = adonis2(formula = dm ~ sample_type, data = site_metadata, permutations = 999)
+      
+      # Store result
+      adonis2_results[[site]] = adonis2_result
+    }
+  }
+  
+  return(adonis2_results)
+}
+
+
+# Run adonis2 for each site, testing the effect of sample_type
+adonis2_results = run_adonis2_per_site(asv_table_experiment_df_SITES_FINAL_rel, metadata_table_experiment_df_SITES_FINAL, "site", "sample_type")
+
+# Print results
+for (site in names(adonis2_results)) {
+  cat("\nAdonis2 results for site:", site, "\n")
+  print(adonis2_results[[site]])
+}
+
+#It's not significant, but it's very likely because we do not have the number of samples necessary to split that up. 
+#I'm going to make a solo plot for 46001 to highlight this.
+
+##Now for the genera
+
+# PERMANOVA
+dm.genera_FINAL=calc_dm(genera_table_experiment_df_SITES_FINAL_rel, method = "bray")
+adonis2(formula = dm.genera_FINAL ~ sample_type, data = metadata_table_experiment_df_SITES_FINAL, permutations = 999)
+adonis2(formula = dm.genera_FINAL ~ site, data = metadata_table_experiment_df_SITES_FINAL, permutations = 999)
+
+#Remove specified columns from rel abund
+genera_table_experiment_df_SITES_FINAL_rel_noPW = genera_table_experiment_df_SITES_FINAL_rel[ , !(names(genera_table_experiment_df_SITES_FINAL_rel) %in% PW_samples)]
+
+dm.FINALSITE_experiment_noPW=calc_dm(asv_table_experiment_df_SITES_FINAL_rel_noPW, method = "bray")
+adonis2(dm.FINALSITE_experiment_noPW ~ region, data = metadata_table_experiment_df_SITES_FINAL_noPW, permutations = 999)
+
+adonis2(formula = dm.genera_FINAL ~ region, data = metadata_table_experiment_df_SITES_FINAL, permutations = 999)
+
+Ord_experiment_FINAL=metaMDS(t(genera_table_experiment_df_SITES_FINAL_rel), distance = "bray", noshare = T, trace = 1, autotransform=T) #make distance matrix
+stressplot(Ord_experiment_FINAL) #looks fine
+
+Ord_experiment_FINAL = as.data.frame(scores(Ord_experiment_FINAL)$sites)
+Ord_experiment_FINAL$sample_type = metadata_table_experiment_df_SITES_FINAL$sample_type
+Ord_experiment_FINAL$SampleID = rownames(Ord_experiment_FINAL)
+Ord_experiment_FINAL$sample_point = metadata_table_experiment_df_SITES_FINAL$sample_point
+Ord_experiment_FINAL$site = metadata_table_experiment_df_SITES_FINAL$site
+Ord_experiment_FINAL$region = metadata_table_experiment_df_SITES_FINAL$region
+
+mcolors = c("#f69418", "#628b29", "#ffcdbd", "#20a47b")
+
+sample_type_experiment_NMDS_FINAL = Ord_experiment_FINAL %>%
+  ggplot(aes(x = NMDS1, y = NMDS2)) +
+  geom_point(aes(shape = sample_type, color = site), size = 5) +
+  #geom_text_repel(aes(label = SampleID), size = 3, point.padding = 0.5, max.overlaps = 20) +  # Add Sample IDs as labels
+  scale_color_manual(values = mcolors) +
+#  geom_polygon(aes(fill = site, color = site), alpha = 0.2, linetype = 2, position = "identity", show.legend = FALSE) +  # If needed
+  new_scale_color() +
+  scale_shape_manual(values = shape_values) +
+  theme_bw() +
+  scale_fill_manual(values = mcolors) +
+  labs(title = "Experiment - NMDS Sample Type")
+
+sample_type_experiment_NMDS_FINAL
+
+#ggsave(sample_type_experiment_NMDS_FINAL, file = "nmds_sampletype.pdf")
+
+regionmcolors=c("#ffde00", "#c52929","#d58b52")
+
+region_experiment_NMDS_FINAL = Ord_experiment_FINAL %>%
+  ggplot(aes(x = NMDS1, y = NMDS2)) +
+  geom_point(aes(shape = sample_type, color = region), size = 5) +
+  #geom_text_repel(aes(label = SampleID), size = 3, point.padding = 0.5, max.overlaps = 20) +  # Add Sample IDs as labels
+  scale_color_manual(values = regionmcolors) +
+#  geom_polygon(aes(fill = site, color = site), alpha = 0.2, linetype = 2, position = "identity", show.legend = FALSE) +  # If needed
+  new_scale_color() +
+  scale_shape_manual(values = shape_values) +
+  theme_bw() +
+  scale_fill_manual(values = mcolors) +
+  labs(title = "Experiment - NMDS Region")
+
+region_experiment_NMDS_FINAL
+
+#ggsave(region_experiment_NMDS_FINAL, file = "nmds_region.pdf")
+
+
+#
+#
+#
+#Let's now run each NMDS individually and group it into a facet plot later:
+#
+#
+#
+
+# Split data and run metaMDS for each site
+combined_nmds_df_FINAL = run_metaMDS(genera_table_experiment_df_SITES_FINAL_rel, metadata_table_experiment_df_SITES_FINAL, "site")
 
 # Create faceted NMDS plot
 sample_type_experiment_NMDS_FINAL = combined_nmds_df_FINAL %>%
@@ -504,25 +1329,25 @@ print(sample_type_experiment_NMDS_FINAL)
 #Here we go. I think there is a significant trend here for 46001. Run the stats:
 
 # Function to perform adonis2 per site
-run_adonis2_per_site <- function(df, metadata, site_column, sample_type_column) {
-  sites <- unique(metadata[[site_column]])
-  adonis2_results <- list()
+run_adonis2_per_site = function(df, metadata, site_column, sample_type_column) {
+  sites = unique(metadata[[site_column]])
+  adonis2_results = list()
   
   for (site in sites) {
-    # Filter ASV table and metadata for the current site
-    site_asv <- df[, metadata[[site_column]] == site, drop = FALSE]
-    site_metadata <- metadata[metadata[[site_column]] == site, ]
+    # Filter genera table and metadata for the current site
+    site_genera = df[, metadata[[site_column]] == site, drop = FALSE]
+    site_metadata = metadata[metadata[[site_column]] == site, ]
     
     # Ensure there are columns/rows to process
-    if (ncol(site_asv) > 1 && nrow(site_metadata) > 1) {
+    if (ncol(site_genera) > 1 && nrow(site_metadata) > 1) {
       # Calculate Bray-Curtis distance matrix
-      dm <- vegdist(t(site_asv), method = "bray")
+      dm = vegdist(t(site_genera), method = "bray")
       
       # Run adonis2
-      adonis2_result <- adonis2(formula = dm ~ sample_type, data = site_metadata, permutations = 999)
+      adonis2_result = adonis2(formula = dm ~ sample_type, data = site_metadata, permutations = 999)
       
       # Store result
-      adonis2_results[[site]] <- adonis2_result
+      adonis2_results[[site]] = adonis2_result
     }
   }
   
@@ -531,7 +1356,7 @@ run_adonis2_per_site <- function(df, metadata, site_column, sample_type_column) 
 
 
 # Run adonis2 for each site, testing the effect of sample_type
-adonis2_results <- run_adonis2_per_site(asv_table_experiment_df_SITES_FINAL_rel, metadata_table_experiment_df_SITES_FINAL, "site", "sample_type")
+adonis2_results = run_adonis2_per_site(genera_table_experiment_df_SITES_FINAL_rel, metadata_table_experiment_df_SITES_FINAL, "site", "sample_type")
 
 # Print results
 for (site in names(adonis2_results)) {
@@ -539,7 +1364,371 @@ for (site in names(adonis2_results)) {
   print(adonis2_results[[site]])
 }
 
-#Nothing really significant here after i subset this data for the handful of sites that we did have data for to compare. Up to this point, the ASV communities (and genera) are significantly different across sites, but not across sample types. I.e., the biology does not seem to be affected by the coal combustion plants. Now, I'm going to see if i can piece out anything on the chemistry side of things below.
+#Nothing really significant here after i subset this data for the handful of sites that we did have data for to compare. Up to this point, the ASV communities (and genera) are significantly different across sites, but not across sample types. I.e., the biology does not seem to be affected by the coal combustion plants, overall. The genera is not different by any sample type. 
+
+#Now, I'm going to see if i can piece out anything on the chemistry side of things below. Before that though, going to plot out the 4 sites that we have enough samples for to really get at the nitty gritty of site-level differences. Within sites that we have samples for, can we detect significant differences? Going to make a NMDS figure with loadings that shows which chemicals are driving the site ASV communities in those sites.
+
+asv_table_experiment_df_SITES_FINAL_rel_nozero = asv_table_experiment_df_SITES_FINAL_rel %>%
+  filter(rowSums(.) != 0)
+
+NMDS_Bray_SiteNMDS =metaMDS(t(asv_table_experiment_df_SITES_FINAL_rel_nozero), distance = "bray", k =2,
+                              noshare = 0.1, trace = 1, trymax = 999, autotransform=T)
+
+stressplot(NMDS_Bray_SiteNMDS) #looks good
+
+#Now lets cut down the chemistry.
+chemistry_df_final_input_chemChop_SITES_FINAL = chemistry_df_final_input_chemChop %>%
+  t() %>%
+  as.data.frame() %>%
+  select(-c(S27, S26, S62, S34, S60, S6, S68, S76, S77, S75, S74, S73, S64, S45, S47, S49, S51, S53, S55, S59, S81, S82, S83, S84, S31, S32, S29, S30, S36, S38, S39, S42, S41, S43)) %>%
+  t() %>%
+  as.data.frame()
+
+####Simple Ord with env factors
+#start with prcomp
+chem.pca_log=prcomp(na.omit(chemistry_df_final_input_chemChop_SITES_FINAL), center=TRUE, scale.=TRUE)
+asvord=metaMDS(t(asv_table_experiment_df_SITES_FINAL_rel_nozero), distance = "bray")
+fit_ord = envfit(asvord, chemistry_df_final_input_chemChop_SITES_FINAL, perm = 999, na.rm=TRUE)
+scores(fit_ord, "vectors")
+#pdf("chemical_plot_ASV.pdf")
+plot(asvord)
+plot(fit_ord)
+plot(fit_ord, p.max = 0.05, col = "green")
+#dev.off()
+
+en = envfit(NMDS_Bray_SiteNMDS, chemistry_df_final_input_chemChop_SITES_FINAL, permutations = 999, na.rm = TRUE)
+data.scores = as.data.frame(scores(NMDS_Bray_SiteNMDS)$sites)
+data.scores$Sample.Type = metadata_table_experiment_df_SITES_FINAL$sample_type
+data.scores$Site = metadata_table_experiment_df_SITES_FINAL$site
+en_coord_cont = as.data.frame(scores(en, "vectors")) * ordiArrowMul(en)
+en_coord_cont$Compound = rownames(en_coord_cont)
+
+###########Now do the final plot with the loadings as bars.
+distance = function(x, y, home = c(0,0)) {
+  sqrt((x-home[1])^2 + (y-home[2])^2)
+}
+
+#create loadings df for plot arrows
+v_scrs = as.data.frame(scores(en, display = "vectors"))
+v_scrs = cbind(v_scrs*ordiArrowMul(en), Compound = rownames(v_scrs))
+
+v_scrs = v_scrs %>%
+  mutate(dist_pc1pc2 = distance(NMDS1, NMDS2), #distance in space from center
+         scaled_dist = dist_pc1pc2 * 10)
+
+#get top 10 compounds based on distance in space from center
+top_dist_compounds = v_scrs %>%
+  arrange(desc(scaled_dist)) %>%
+  slice_head(n = 10) %>%
+  mutate(num_lab = 1:10) %>%
+  select(Compound, num_lab)
+
+#make plotting columns for loadings df
+v_scrs = v_scrs %>%
+  mutate(top_c = ifelse(Compound %in% top_dist_compounds$Compound,"top","other"),
+         alpha_factor = ifelse(top_c == "top", 1, 0.5),
+         plot_pc1 = ifelse(top_c == "top", NMDS1, 0),
+         plot_pc2 = ifelse(top_c == "top", NMDS2, 0),
+         top_label = ifelse(top_c == "top", Compound, "")) %>%
+  left_join(top_dist_compounds, by = c("Compound"))
+
+
+shape_values = c("Ash Pond Water" = 15,
+                  "CCP Porewater" = 16,
+                  "GW-Downgradient" = 17,
+                  "GW-Upgradient" = 18)
+
+site_colors = c("22354" = "#628b29", 
+                "3586" = "#ffcdbd", 
+                "46001" = "#20a47b", 
+                "13116" = "#ee83b4",
+                "33107" = "#186294", 
+                "25410" = "#c5c5c5", 
+                "35406" = "#83deff", 
+                "22348" = "#eeffc5",
+                "25427" = "#39394a", 
+                "13113" = "#eeca03", 
+                "42195" = "#523910", 
+                "42201" = "#ffeea4", 
+                "33106" = "#eac5ff", 
+                "17481" = "#f69418")
+
+asv_samplePoint_bars = data.scores %>%
+  ggplot(aes(x = NMDS1, y = NMDS2)) +
+  geom_segment(data = v_scrs,
+               aes(x= 0, xend = NMDS1, 
+                   y = 0, yend = NMDS2, 
+                   alpha = alpha_factor,
+                   color = Compound),
+               arrow = arrow(length = unit(0.5, "cm")),
+               inherit.aes = FALSE)  +
+  scale_color_manual(values=wes_palette("FantasticFox1", type="continuous", 26)) + 
+  geom_text(data = v_scrs,
+            aes(label = num_lab,
+                x = NMDS1,
+                y = NMDS2),
+            size = 3) +
+  new_scale_color()+
+  geom_point(aes(color = Site, shape = Sample.Type), size = 4) +
+  scale_shape_manual(values = shape_values) +
+  scale_color_manual(values=site_colors) +
+  #stat_ellipse(aes(fill = Sample.Type, color = Sample.Type), alpha = 0.2, geom = "polygon", type="t") +
+  theme_bw()
+
+asv_samplePoint_bars
+
+#ggsave(asv_samplePoint_bars, file="NMDS_ASVs_v1.pdf", width = 8, height = 6)
+
+#pc1 loadings barchart
+NMDS1_loadings_bar = v_scrs %>%
+  ggplot(aes(x = reorder(Compound,NMDS1), y = abs(NMDS1))) +
+  geom_bar(stat = "identity",
+           aes(fill = Compound))  +
+  scale_fill_manual(values=wes_palette("FantasticFox1", type="continuous", 26)) + 
+  geom_text(aes(label = Compound, angle=90)) +
+  labs(y = "Scaled NMDS1 Loadings of Significant Compounds",
+       x = NULL) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        legend.position = "none")
+# theme(legend.position = "none",
+#       axis.text.x = element_blank(),
+#       axis.text.y = element_blank(),
+#       axis.title = element_blank())
+
+NMDS1_loadings_bar
+
+#ggsave(NMDS1_loadings_bar, file="ASVLoadingBar1.pdf", width = 4, height = 3)
+
+#pc2 loadings barchart
+NMDS2_loadings_bar = v_scrs %>%
+  ggplot(aes(x = abs(NMDS2), y = reorder(Compound,NMDS2))) +
+  geom_bar(stat = "identity",
+           aes(fill = Compound)) +
+  scale_fill_manual(values=wes_palette("FantasticFox1", type="continuous", 26)) + 
+  geom_text(aes(label = Compound)) +
+  labs(y = "Scaled NMDS2 Loadings of Significant Compounds",
+       x = NULL) +
+  theme_bw() +
+  theme(axis.text.y = element_blank(),
+        legend.position = "none")
+
+NMDS2_loadings_bar
+
+#ggsave(NMDS2_loadings_bar, file="ASVLoadingBar2.pdf", width = 4, height = 3)
+
+
+#This is interesting because i can see 46001 start to split up between GW-Up and GW-Down. Possible CCP impact.
+
+
+#Now im just going to plot 46001
+
+asv_table_experiment_df_SITES_FINAL_rel_nozero_46001 = asv_table_experiment_df_SITES_FINAL_rel %>%
+  select(S1601, S1602, S21, S22, S23, S24, S3, S4, S5) %>%
+  filter(rowSums(.) != 0)
+
+#Now lets cut down the chemistry.
+chemistry_df_final_input_chemChop_SITES_FINAL_46001 = chemistry_df_final_input_chemChop %>%
+  t() %>%
+  as.data.frame() %>%
+  select(S1601, S1602, S21, S22, S23, S24, S3, S4, S5) %>%
+  t() %>%
+  as.data.frame() %>%
+  select(where(~ any(. != 0)))
+
+metadata_table_experiment_df_SITES_FINAL_46001 = metadata_table_experiment_df_SITES_FINAL %>%
+  filter(pivot_id == "46001")
+
+dm.46001_FINAL=calc_dm(asv_table_experiment_df_SITES_FINAL_rel_nozero_46001, method = "bray")
+adonis2(formula = dm.46001_FINAL ~ sample_type, data = metadata_table_experiment_df_SITES_FINAL_46001, permutations = 999)
+
+#This is not significant but...we only have 2 samples of the downriver so i really think if we had more this would fall out. Let's try this another way.
+
+NMDS_Bray_SiteNMDS_46001 =metaMDS(t(asv_table_experiment_df_SITES_FINAL_rel_nozero_46001), distance = "bray", k=2, noshare = 0.1, trace = 1, trymax = 999, autotransform=T)
+
+stressplot(NMDS_Bray_SiteNMDS) #not great but its fine.
+
+
+####Simple Ord with env factors
+#start with prcomp
+chem.pca_log=prcomp(na.omit(chemistry_df_final_input_chemChop_SITES_FINAL_46001), center=TRUE, scale.=TRUE)
+asvord=metaMDS(t(asv_table_experiment_df_SITES_FINAL_rel_nozero_46001), distance = "bray")
+fit_ord = envfit(asvord, chemistry_df_final_input_chemChop_SITES_FINAL_46001, perm = 999, na.rm=TRUE)
+scores(fit_ord, "vectors")
+#pdf("chemical_plot_ASV.pdf")
+plot(asvord)
+plot(fit_ord)
+plot(fit_ord, p.max = 0.05, col = "green")
+#dev.off()
+
+en = envfit(NMDS_Bray_SiteNMDS_46001, chemistry_df_final_input_chemChop_SITES_FINAL_46001, permutations = 999, na.rm = TRUE)
+data.scores = as.data.frame(scores(NMDS_Bray_SiteNMDS_46001)$sites)
+data.scores$Sample.Type = metadata_table_experiment_df_SITES_FINAL_46001$sample_type
+data.scores$Site = metadata_table_experiment_df_SITES_FINAL_46001$site
+en_coord_cont = as.data.frame(scores(en, "vectors")) * ordiArrowMul(en)
+en_coord_cont$Compound = rownames(en_coord_cont)
+
+###########Now do the final plot with the loadings as bars.
+distance = function(x, y, home = c(0,0)) {
+  sqrt((x-home[1])^2 + (y-home[2])^2)
+}
+
+#create loadings df for plot arrows
+v_scrs = as.data.frame(scores(en, display = "vectors"))
+v_scrs = cbind(v_scrs*ordiArrowMul(en), Compound = rownames(v_scrs))
+
+v_scrs = v_scrs %>%
+  mutate(dist_pc1pc2 = distance(NMDS1, NMDS2), #distance in space from center
+         scaled_dist = dist_pc1pc2 * 10)
+
+#get top 10 compounds based on distance in space from center
+top_dist_compounds = v_scrs %>%
+  arrange(desc(scaled_dist)) %>%
+  slice_head(n = 10) %>%
+  mutate(num_lab = 1:10) %>%
+  select(Compound, num_lab)
+
+#make plotting columns for loadings df
+v_scrs = v_scrs %>%
+  mutate(top_c = ifelse(Compound %in% top_dist_compounds$Compound,"top","other"),
+         alpha_factor = ifelse(top_c == "top", 1, 0.5),
+         plot_pc1 = ifelse(top_c == "top", NMDS1, 0),
+         plot_pc2 = ifelse(top_c == "top", NMDS2, 0),
+         top_label = ifelse(top_c == "top", Compound, "")) %>%
+  left_join(top_dist_compounds, by = c("Compound"))
+
+
+shape_values = c("Ash Pond Water" = 15,
+                  "CCP Porewater" = 16,
+                  "GW-Downgradient" = 17,
+                  "GW-Upgradient" = 18)
+
+site_colors = c("22354" = "#628b29", 
+                "3586" = "#ffcdbd", 
+                "46001" = "#20a47b", 
+                "13116" = "#ee83b4",
+                "33107" = "#186294", 
+                "25410" = "#c5c5c5", 
+                "35406" = "#83deff", 
+                "22348" = "#eeffc5",
+                "25427" = "#39394a", 
+                "13113" = "#eeca03", 
+                "42195" = "#523910", 
+                "42201" = "#ffeea4", 
+                "33106" = "#eac5ff", 
+                "17481" = "#f69418")
+
+asv_samplePoint_bars = data.scores %>%
+  ggplot(aes(x = NMDS1, y = NMDS2)) +
+  geom_segment(data = v_scrs,
+               aes(x= 0, xend = NMDS1, 
+                   y = 0, yend = NMDS2, 
+                   alpha = alpha_factor,
+                   color = Compound),
+               arrow = arrow(length = unit(0.5, "cm")),
+               inherit.aes = FALSE)  +
+  scale_color_manual(values=wes_palette("FantasticFox1", type="continuous", 26)) + 
+  geom_text(data = v_scrs,
+            aes(label = num_lab,
+                x = NMDS1,
+                y = NMDS2),
+            size = 3) +
+  new_scale_color()+
+  geom_point(aes(color = Site, shape = Sample.Type), size = 4) +
+  scale_shape_manual(values = shape_values) +
+  scale_color_manual(values=site_colors) +
+  #stat_ellipse(aes(fill = Sample.Type, color = Sample.Type), alpha = 0.2, geom = "polygon", type="t") +
+  theme_bw()
+
+asv_samplePoint_bars
+
+#ggsave(asv_samplePoint_bars, file="NMDS_ASVs_v1_46001.pdf", width = 8, height = 6)
+
+#pc1 loadings barchart
+NMDS1_loadings_bar = v_scrs %>%
+  ggplot(aes(x = reorder(Compound,NMDS1), y = abs(NMDS1))) +
+  geom_bar(stat = "identity",
+           aes(fill = Compound))  +
+  scale_fill_manual(values=wes_palette("FantasticFox1", type="continuous", 26)) + 
+  geom_text(aes(label = Compound, angle=90)) +
+  labs(y = "Scaled NMDS1 Loadings of Significant Compounds",
+       x = NULL) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        legend.position = "none")
+# theme(legend.position = "none",
+#       axis.text.x = element_blank(),
+#       axis.text.y = element_blank(),
+#       axis.title = element_blank())
+
+NMDS1_loadings_bar
+
+#ggsave(NMDS1_loadings_bar, file="ASVLoadingBar1.pdf", width = 4, height = 3)
+
+#pc2 loadings barchart
+NMDS2_loadings_bar = v_scrs %>%
+  ggplot(aes(x = abs(NMDS2), y = reorder(Compound,NMDS2))) +
+  geom_bar(stat = "identity",
+           aes(fill = Compound)) +
+  scale_fill_manual(values=wes_palette("FantasticFox1", type="continuous", 26)) + 
+  geom_text(aes(label = Compound)) +
+  labs(y = "Scaled NMDS2 Loadings of Significant Compounds",
+       x = NULL) +
+  theme_bw() +
+  theme(axis.text.y = element_blank(),
+        legend.position = "none")
+
+NMDS2_loadings_bar
+
+#ggsave(NMDS2_loadings_bar, file="ASVLoadingBar2.pdf", width = 4, height = 3)
+
+#Let me try to plot this a little more creatively while running some stats:
+
+chem_features = rownames(t(chemistry_df_final_input_chemChop_SITES_FINAL_46001))
+nmds_scores = as.data.frame(scores(NMDS_Bray_SiteNMDS_46001)$sites)
+
+# Initialize correlation results dataframe
+cor_results = data.frame(Feature = chem_features,
+                         R_NMDS1 = numeric(length(chem_features)),
+                         p_value_NMDS1 = numeric(length(chem_features)),
+                         R_NMDS2 = numeric(length(chem_features)),
+                         p_value_NMDS2 = numeric(length(chem_features)))
+
+# Calculate Spearman correlations
+for (i in 1:length(chem_features)) {
+  feat = chem_features[i]
+  cor_test_NMDS1 = cor.test(nmds_scores$NMDS1, chemistry_df_final_input_chemChop_SITES_FINAL_46001[, feat], method = "spearman")
+  cor_test_NMDS2 = cor.test(nmds_scores$NMDS2, chemistry_df_final_input_chemChop_SITES_FINAL_46001[, feat], method = "spearman")
+  
+  cor_results$R_NMDS1[i] = cor_test_NMDS1$estimate
+  cor_results$p_value_NMDS1[i] = cor_test_NMDS1$p.value
+  cor_results$R_NMDS2[i] = cor_test_NMDS2$estimate
+  cor_results$p_value_NMDS2[i] = cor_test_NMDS2$p.value
+}
+
+# Pivot longer for plotting
+corrs_pivot_longer = cor_results %>%
+  pivot_longer(cols = starts_with("R_"), names_pattern = "R_(.*)", names_to = c("NMDS_Axis"), values_to = "R") %>%
+  pivot_longer(cols = starts_with("p_value_"), names_pattern = "p_value_(.*)", names_to = c("NMDS_Axis_pval"), values_to = "p_value") %>%
+  filter(NMDS_Axis == NMDS_Axis_pval) %>%
+  select(-NMDS_Axis_pval)
+
+# Create the scatter bubble plot
+scatter_bubble = ggplot(corrs_pivot_longer, aes(x = Feature, y = R, size = p_value, color = NMDS_Axis, shape = NMDS_Axis)) +
+  geom_point(alpha = 0.7) +
+  theme_minimal() +
+  labs(x = "Chemistry Feature", y = "Spearman Correlation (R)", size = "p-value", 
+       shape = "NMDS Axis", color = "NMDS Axis") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
+  scale_y_continuous(breaks = seq(-1, 1, by = 0.5), limits = c(-1, 1)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.3)) +
+  scale_color_manual(values = c("NMDS1" = "#ffa439", "NMDS2" = "#c5e67b"))
+
+scatter_bubble
+
+#ggsave(scatter_bubble, file="NMDS_spearman_bubble_plot.pdf", width = 10, height = 4)
+
+#There it is. Site 46001 is different by community. I don't have enough samples to get significance for more values or to robustly test this, but with proper samples i believe this would start splitting out more statistically.
 
 ```
 
@@ -550,6 +1739,20 @@ for (site in names(adonis2_results)) {
 #Making a metadata table from the chemistry df itself:
 chemistry_metadat = chemistry_df_final %>%
   select(c(1:4))
+
+# Select and rename the 'site' column to 'Site' while ensuring it's of type character
+metadata_selected = metadata_table_experiment_df %>%
+  select(Site = site, region) %>%
+  distinct(Site, .keep_all = TRUE) %>%
+  mutate(Site = as.character(Site))
+
+# Ensure 'Site' in chemistry_metadat is of type character
+chemistry_metadat = chemistry_metadat %>%
+  mutate(Site = as.character(Site))
+
+# Merge the region column into the chemistry_metadat dataframe by the Site column
+chemistry_metadat = chemistry_metadat %>%
+  left_join(metadata_selected, by = "Site")
 
 #Now lets organize the chem table
 chemistry_df_withNA_input = chemistry_df_final %>%
@@ -562,53 +1765,66 @@ chemistry_df_withNA_input = chemistry_df_final %>%
 chemistry_df_final_input_chemChop = chemistry_df_withNA_input %>%
   select(-c(alk_bicarb, alk_carb, alk_total, Cl, Cu, DO, Mn, Ni, Mg, ORP, ph_lab, TURB, Zn)) %>%
   mutate(across(where(is.numeric), ~ ifelse(. < 0, 0, .)))
-  
+
 # PERMANOVA for controls
 dm.chem_control=calc_dm(t(chemistry_df_final_input_chemChop), method = "bray")
 adonis2(formula = dm.chem_control ~ Sample.Type, data = chemistry_metadat, permutations = 999)
 adonis2(formula = dm.chem_control ~ Site, data = chemistry_metadat, permutations = 999)
-adonis2(formula = dm.chem_control ~ Sample.Type + Site, data = chemistry_metadat, permutations = 999)
+
+#Remove specified columns from rel abund
+chemistry_df_final_input_chemChop_noPW = chemistry_df_final_input_chemChop[!rownames(chemistry_df_final_input_chemChop) %in% PW_samples, ]
+
+#Remove the rows from metadat
+chemistry_metadat_noPW <- chemistry_metadat %>%
+  filter(!(site_id %in% PW_samples))
+
+dm.asv_experiment_chem_noPW=calc_dm(t(chemistry_df_final_input_chemChop_noPW), method = "bray")
+adonis2(dm.asv_experiment_chem_noPW ~ region, data = chemistry_metadat_noPW, permutations = 999)
+
+#I'm not going to go super deep into the region stuff, so im just going to remove this.
+chemistry_metadat = chemistry_metadat %>%
+  select(-c(region))
 
 #Looks like Sample Type and Site are both significantly different here. Let's do some pairwise comparisons.
 
-chemical_data_formerge <- as.data.frame(chemistry_df_final_input_chemChop)
+chemical_data_formerge = as.data.frame(chemistry_df_final_input_chemChop)
 
 # Ensure metadata rows match the sample IDs in chemical_data
-metadata <- chemistry_metadat[chemistry_metadat$site_id %in% rownames(chemical_data_formerge), ]
+metadata = chemistry_metadat[chemistry_metadat$site_id %in% rownames(chemical_data_formerge), ]
 
 # Add Sample IDs as a column
-chemical_data_formerge$site_id <- rownames(chemical_data_formerge)
+chemical_data_formerge$site_id = rownames(chemical_data_formerge)
 
 # Merge chemical data with metadata
-chem_merged <- chemical_data_formerge %>%
+chem_merged = chemical_data_formerge %>%
   inner_join(metadata, by = 'site_id') %>%
   select(-c(Sample.Point))
 
 # Automatically identify chemical columns (excluding metadata columns)
-metadata_columns <- c('site_id', 'Sample.Type', 'Site') # Add any other columns that are not chemical measurements
-chemical_columns <- setdiff(colnames(chem_merged), metadata_columns)
+metadata_columns = c('site_id', 'Sample.Type', 'Site') # Add any other columns that are not chemical measurements
+chemical_columns = setdiff(colnames(chem_merged), metadata_columns)
 
 # Run ANOVA for each chemical value and perform TukeyHSD post-hoc test
-anova_results <- list()
-tukey_results <- list()
-significant_anovas <- list()
-significant_tukeys <- list()
+anova_results = list()
+tukey_results = list()
+significant_anovas = list()
+significant_tukeys = list()
 
 for (chemical_col in chemical_columns) {
-  anova_result <- aov(as.formula(paste(chemical_col, "~ Sample.Type")), data = chem_merged)
-  anova_summary <- summary(anova_result)
-  anova_results[[chemical_col]] <- anova_summary
+  anova_result = aov(as.formula(paste(chemical_col, "~ Sample.Type")), data = chem_merged)
+  anova_summary = summary(anova_result)
+  anova_results[[chemical_col]] = anova_summary
   
   # Check if the ANOVA is significant (p-value < 0.05)
   if (anova_summary[[1]]$`Pr(>F)`[1] < 0.05) {
-    significant_anovas[[chemical_col]] <- anova_summary
+    significant_anovas[[chemical_col]] = anova_summary
     
     # Post-hoc Tukey test
-    tukey_result <- TukeyHSD(anova_result, "Sample.Type")
+    tukey_result = TukeyHSD(anova_result, "Sample.Type")
     
     # Filter significant results from TukeyHSD
     if (any(tukey_result$`Sample.Type`[, "p adj"] < 0.05)) {
-      significant_tukeys[[chemical_col]] <- tukey_result
+      significant_tukeys[[chemical_col]] = tukey_result
     }
   }
 }
@@ -627,29 +1843,29 @@ print(significant_tukeys)
 #
 
 # Ensure 'Site' is a factor
-# chem_merged$Site <- as.factor(chem_merged$Site)
+# chem_merged$Site = as.factor(chem_merged$Site)
 
 # Run ANOVA for each chemical value and perform TukeyHSD post-hoc test
-# anova_results_site <- list()
-# tukey_results_site <- list()
-# significant_anovas_site <- list()
-# significant_tukeys_site <- list()
+# anova_results_site = list()
+# tukey_results_site = list()
+# significant_anovas_site = list()
+# significant_tukeys_site = list()
 
 # for (chemical_col in chemical_columns_site) {
-#     anova_result_site <- aov(as.formula(paste(chemical_col, "~ Site")), data = chem_merged)
-#     anova_summary_site <- summary(anova_result_site)
-#     anova_results_site[[chemical_col]] <- anova_summary_site
+#     anova_result_site = aov(as.formula(paste(chemical_col, "~ Site")), data = chem_merged)
+#     anova_summary_site = summary(anova_result_site)
+#     anova_results_site[[chemical_col]] = anova_summary_site
     
 #     # Check if the ANOVA is significant (p-value < 0.05)
 #     if (anova_summary_site[[1]]$`Pr(>F)`[1] < 0.05) {
-#         significant_anovas_site[[chemical_col]] <- anova_summary_site
+#         significant_anovas_site[[chemical_col]] = anova_summary_site
         
 #         # Post-hoc Tukey test
-#         tukey_result_site <- TukeyHSD(anova_result_site, "Site")
+#         tukey_result_site = TukeyHSD(anova_result_site, "Site")
         
 #         # Filter significant results from TukeyHSD
 #         if (any(tukey_result_site$`Site`[, "p adj"] < 0.05)) {
-#             significant_tukeys_site[[chemical_col]] <- tukey_result_site
+#             significant_tukeys_site[[chemical_col]] = tukey_result_site
 #         }
 #     }
 # }
@@ -682,43 +1898,50 @@ chem_merge_SITES = chem_merged %>%
   filter(!grepl("25427", Site)) %>%
   filter(!grepl("42195", Site)) %>%
   filter(!grepl("42201", Site)) %>%
-  filter(!grepl("35406", Site))
-
+  filter(!grepl("35406", Site)) %>%
+  filter(!grepl("33106", Site)) %>%
+  filter(!grepl("33107", Site))
 
 # Assuming chem_merge_SITES is your dataframe
-chem_merge_SITES$Sample.Type <- as.factor(chem_merge_SITES$Sample.Type)
-chem_merge_SITES$Site <- as.factor(chem_merge_SITES$Site)
+chem_merge_SITES$Sample.Type = as.factor(chem_merge_SITES$Sample.Type)
+chem_merge_SITES$Site = as.factor(chem_merge_SITES$Site)
 
 # Exclude non-numeric columns for pivoting
-numeric_columns <- setdiff(names(chem_merge_SITES), c("Site", "Sample.Type", "site_id"))
+numeric_columns = setdiff(names(chem_merge_SITES), c("Site", "Sample.Type", "site_id"))
 
-chem_long <- chem_merge_SITES %>%
+chem_long = chem_merge_SITES %>%
     pivot_longer(cols = all_of(numeric_columns), names_to = "Chemistry", values_to = "Value")
 
-anova_results <- chem_long %>%
+chem_long = chem_long %>%
+  mutate(Sample.Type = case_when(
+    Sample.Type == 'Ash Pond Water' ~ 'CCP Porewater',
+    TRUE ~ Sample.Type
+  ))
+
+anova_results = chem_long %>%
     group_by(Site, Chemistry) %>%
     do(tidy(aov(Value ~ Sample.Type, data = .)))
 
 # Filter for significant results (p-value < 0.05)
-significant_anova <- anova_results %>%
+significant_anova = anova_results %>%
     filter(p.value < 0.05 & term == "Sample.Type")
 
-posthoc_results <- chem_long %>%
+posthoc_results = chem_long %>%
     filter(Chemistry %in% significant_anova$Chemistry & Site %in% significant_anova$Site) %>%
     group_by(Site, Chemistry) %>%
     do(tidy(TukeyHSD(aov(Value ~ Sample.Type, data = .))))
 
-significant_posthoc <- posthoc_results %>%
+significant_posthoc = posthoc_results %>%
     filter(adj.p.value < 0.05)
 
 print(significant_posthoc)
 
 # Extract significant pair-wise comparisons specifically for GW-Upgradient-GW-Downgradient
-significant_posthoc <- posthoc_results %>%
+significant_posthoc = posthoc_results %>%
     filter(adj.p.value < 0.05 & str_detect(contrast, "GW-Upgradient-GW-Downgradient"))
 
 # Summarize the number of significant p-values per site
-significant_summary <- significant_posthoc %>%
+significant_summary = significant_posthoc %>%
     group_by(Site) %>%
     summarize(count = n())
 
@@ -729,22 +1952,28 @@ ggplot(significant_summary, aes(x = reorder(Site, -count), y = count)) +
          x = "Site", y = "Number of Significant P-Values") +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-#It looks like the only Site that has significantly different values between GW-Upgradient and GW-Downgradient is: 46001 and that is for F, Ba, and Temp. However, take with caution because this site only has 2 samples in GW-Upgradient and 3 in GW-Downgradient.
+#It looks like the only Site that has significantly different values between GW-Upgradient and GW-Downgradient is: 46001 and that is for F, Ba, and Temp. Again, take with caution because this site only has 2 samples in GW-Upgradient and 3 in GW-Downgradient.
 
 # Extract significant pair-wise comparisons
-significant_posthoc <- posthoc_results %>%
+significant_posthoc = posthoc_results %>%
     filter(adj.p.value < 0.05)
 
+significant_posthoc
+
+sigchem_df = as.data.frame(significant_posthoc)
+
 # Summarize the number of significant p-values per site and contrast
-significant_summary <- significant_posthoc %>%
+significant_summary = significant_posthoc %>%
     group_by(Site, contrast) %>%
     summarize(count = n(), .groups = 'drop')
 
 # Filter out sites with no significant p-values
-significant_sites <- significant_summary %>%
+significant_sites = significant_summary %>%
     group_by(Site) %>%
     filter(sum(count) > 0) %>%
     ungroup()
+
+significant_sites
 
 # Function to plot significant p-values for each site
 significant_chemdiffs_plots = ggplot(significant_sites, aes(x = contrast, y = count)) +
@@ -760,6 +1989,8 @@ significant_chemdiffs_plots
 
 #ggsave(significant_chemdiffs_plots, file="sig.plots_chem.pdf")
 
+#Alright now i have the ones that are significant and that will come in later. but i need to plot these in overall.
+
 #Let's do some NMDS on these ordinations.
 
 #
@@ -770,14 +2001,23 @@ significant_chemdiffs_plots
 #
 #
 
-Ord_chem=metaMDS(chemistry_df_final_input_chemChop, distance = "bray", noshare = T, trace = 1, autotransform=T) #make distance matrix
-stressplot(Ord_chem) #good
+Ord_chem_base=metaMDS(chemistry_df_final_input_chemChop, distance = "bray", noshare = T, trace = 1, autotransform=T) #make distance matrix
+stressplot(Ord_chem_base) #good
 
-Ord_chem = as.data.frame(scores(Ord_chem)$sites)
+Ord_chem = as.data.frame(scores(Ord_chem_base)$sites)
 Ord_chem$sample_type = chemistry_metadat$Sample.Type
-Ord_chem$Site = as.factor(chemistry_metadat$Site)
+Ord_chem$site = as.factor(chemistry_metadat$Site)
 
-mcolors=c("#628b29", "#ffcdbd","#2F9DA1", "#FF5F5F")
+#Lets loop in the region here too
+# Select only the necessary columns from metadata_table_experiment_df
+metadata_selected = metadata_table_experiment_df %>%
+  select(site, region)
+
+# Merge the region column into the Ord_chem dataframe by the site column
+Ord_chem = Ord_chem %>%
+  left_join(metadata_selected, by = "site")
+
+mcolors=c("#f8766d", "#6a3fff", "#00bfc4", "#c77cff")
 
 sample_type_chemsitry_NMDS = Ord_chem %>%
   ggplot(aes(x = NMDS1, y = NMDS2)) +
@@ -792,28 +2032,58 @@ sample_type_chemsitry_NMDS
 
 #ggsave(sample_type_chemsitry_NMDS, file="sampletype_chemistry_nmds.pdf")
 
-mcolors=c("#628b29", "#ffcdbd", "#e66294","#2F9DA1", "#FF5F5F", "#c5c5c5", "#83deff", "#eeffc5",  "#39394a", "#eeca03", "#523910","#ffeea4", "#944abd", "#f69418")
+# Define the colors for site
+site_colors = c("22354" = "#628b29", 
+                "3586" = "#ffcdbd", 
+                "46001" = "#20a47b", 
+                "13116" = "#ee83b4",
+                "33107" = "#186294", 
+                "25410" = "#c5c5c5", 
+                "35406" = "#83deff", 
+                "22348" = "#eeffc5",
+                "25427" = "#39394a", 
+                "13113" = "#eeca03", 
+                "42195" = "#523910", 
+                "42201" = "#ffeea4", 
+                "33106" = "#eac5ff", 
+                "17481" = "#f69418")
 
 Site_chemsitry_NMDS = Ord_chem %>%
   ggplot(aes(x = NMDS1, y = NMDS2)) +
-  geom_point(aes(color=Site), size = 5) +
-  scale_color_manual(values=mcolors) +
+  geom_point(aes(color=site), size = 5) +
+  scale_color_manual(values=site_colors) +
   theme_bw()  +
-  scale_color_manual(values=mcolors) +
-  scale_fill_manual(values=mcolors) +
+  scale_color_manual(values=site_colors) +
+  scale_fill_manual(values=site_colors) +
   labs(title="Chemistry NMDS Sites")
 
 Site_chemsitry_NMDS
 
-#ggsave(Site_chemsitry_NMDS, file="site_chemistry_nmds.pdf")
+#ggsave(Site_chemsitry_NMDS, file="site_chemistry_nmds.pdf", height=7,width=8)
 
-#Alright - interestingly enough, chemistry here falls out as significantly different. Moreso even than the ASVs Let's make a fancier NMDS to show which chemistry is driving what samples in which direction.
+regionmcolors=c("#ffde00", "#62415a", "#c52929","#d58b52")
+
+region_chemistry_NMDS_FINAL = Ord_chem %>%
+  ggplot(aes(x = NMDS1, y = NMDS2)) +
+  geom_point(aes(shape = sample_type, color = region), size = 5) +
+  scale_color_manual(values = regionmcolors) +
+  new_scale_color() +
+  scale_shape_manual(values = shape_values) +
+  theme_bw() +
+  scale_fill_manual(values = mcolors) +
+  labs(title = "Experiment - Chemistry NMDS Region")
+
+region_chemistry_NMDS_FINAL
+
+#ggsave(region_chemistry_NMDS_FINAL, file = "nmds_region.pdf", height=7, width=9)
+
+#Alright - interestingly enough, chemistry here falls out as significantly different. Let's make a fancier NMDS to show which chemistry is driving what samples in which direction.
 
 ####Simple Ord with env factors
 #start with prcomp
-chem.pca_log<-prcomp(na.omit(chemistry_df_final_input_chemChop), center=TRUE, scale.=TRUE)
-chemord<-metaMDS(chemistry_df_final_input_chemChop, distance = "bray")
-fit_ord <- envfit(chemord, chemistry_df_final_input_chemChop, perm = 999, na.rm=TRUE)
+chem.pca_log=prcomp(na.omit(chemistry_df_final_input_chemChop), center=TRUE, scale.=TRUE)
+chemord=metaMDS(chemistry_df_final_input_chemChop, distance = "bray")
+fit_ord = envfit(chemord, chemistry_df_final_input_chemChop, perm = 999, na.rm=TRUE)
 scores(fit_ord, "vectors")
 #pdf("chemical_plot.pdf")
 plot(chemord)
@@ -822,23 +2092,23 @@ plot(fit_ord, p.max = 0.05, col = "green")
 #dev.off()
 
 #In order to use the PC1 scale, let's establish a variable with all of the PCA scale coordinates by sample
-chem.variables_log<-predict(chem.pca_log)
+chem.variables_log=predict(chem.pca_log)
 
-chem.variables.PC1_log<-chem.variables_log[,1]
+chem.variables.PC1_log=chem.variables_log[,1]
 
 #This establishes the coordinates for the samples and all vOTUS onto an non-metric dimensional scaling
-ord_chem<-metaMDS(chemistry_df_final_input_chemChop)
+ord_chem=metaMDS(chemistry_df_final_input_chemChop)
 ord_chem # the stress for this should be around <.1 
 stressplot(ord_chem) #scatter seems close to the line, demonstrating that it is a good fit. All good!
 
 #envfit here will fit the vectors onto the ordination established above
-fit_ordchem <- envfit(ord_chem, chemistry_df_final_input_chemChop, perm = 999, na.rm=TRUE)
+fit_ordchem = envfit(ord_chem, chemistry_df_final_input_chemChop, perm = 999, na.rm=TRUE)
 scores(fit_ordchem, "vectors")
 
 #Alright looks like most values are significantly different.
 
 #Now to start actually plotting this on ggplot.
-NMDS_Bray_chemistry <-metaMDS(chemistry_df_final_input_chemChop, distance = "bray", k =2,
+NMDS_Bray_chemistry =metaMDS(chemistry_df_final_input_chemChop, distance = "bray", k =2,
                               noshare = 0.1, trace = 1, trymax = 999, autotransform=T)
 stressplot(NMDS_Bray_chemistry) #looks good
 
@@ -849,27 +2119,27 @@ en_coord_cont = as.data.frame(scores(en, "vectors")) * ordiArrowMul(en)
 en_coord_cont$Compound = rownames(en_coord_cont)
 
 ###########Now do the final plot with the loadings as bars.
-distance <- function(x, y, home = c(0,0)) {
+distance = function(x, y, home = c(0,0)) {
   sqrt((x-home[1])^2 + (y-home[2])^2)
 }
 
 #create loadings df for plot arrows
-v_scrs <- as.data.frame(scores(en, display = "vectors"))
-v_scrs <- cbind(v_scrs*ordiArrowMul(en), Compound = rownames(v_scrs))
+v_scrs = as.data.frame(scores(en, display = "vectors"))
+v_scrs = cbind(v_scrs*ordiArrowMul(en), Compound = rownames(v_scrs))
 
-v_scrs <- v_scrs %>%
+v_scrs = v_scrs %>%
   mutate(dist_pc1pc2 = distance(NMDS1, NMDS2), #distance in space from center
          scaled_dist = dist_pc1pc2 * 10)
 
 #get top 10 compounds based on distance in space from center
-top_dist_compounds <- v_scrs %>%
+top_dist_compounds = v_scrs %>%
   arrange(desc(scaled_dist)) %>%
   slice_head(n = 10) %>%
   mutate(num_lab = 1:10) %>%
   select(Compound, num_lab)
 
 #make plotting columns for loadings df
-v_scrs <- v_scrs %>%
+v_scrs = v_scrs %>%
   mutate(top_c = ifelse(Compound %in% top_dist_compounds$Compound,"top","other"),
          alpha_factor = ifelse(top_c == "top", 1, 0.5),
          plot_pc1 = ifelse(top_c == "top", NMDS1, 0),
@@ -877,11 +2147,7 @@ v_scrs <- v_scrs %>%
          top_label = ifelse(top_c == "top", Compound, "")) %>%
   left_join(top_dist_compounds, by = c("Compound"))
 
-#Now plot on ggplot
-library(wesanderson)
-library(RColorBrewer)
-
-chem_samplePoint_bars <- data.scores %>%
+chem_samplePoint_bars = data.scores %>%
   ggplot(aes(x = NMDS1, y = NMDS2)) +
   geom_segment(data = v_scrs,
                aes(x= 0, xend = NMDS1*20, 
@@ -906,7 +2172,7 @@ chem_samplePoint_bars
 #ggsave(chem_samplePoint_bars, file="NMDS_Chemistry_v1.pdf", width = 8, height = 6)
 
 #pc1 loadings barchart
-NMDS1_loadings_bar <- v_scrs %>%
+NMDS1_loadings_bar = v_scrs %>%
   ggplot(aes(x = reorder(Compound,NMDS1), y = abs(NMDS1))) +
   geom_bar(stat = "identity",
            aes(fill = Compound))  +
@@ -927,7 +2193,7 @@ NMDS1_loadings_bar
 #ggsave(NMDS1_loadings_bar, file="LoadingBar1.pdf", width = 4, height = 3)
 
 #pc2 loadings barchart
-NMDS2_loadings_bar <- v_scrs %>%
+NMDS2_loadings_bar = v_scrs %>%
   ggplot(aes(x = abs(NMDS2), y = reorder(Compound,NMDS2))) +
   geom_bar(stat = "identity",
            aes(fill = Compound)) +
@@ -945,16 +2211,77 @@ NMDS2_loadings_bar
 
 #That looks good. Let me see if i can run an indicator analysis on these as well to pull some out:
 
-set.seed(1234)
-indic.chem <- multipatt(chemistry_df_final_input_chemChop, chemistry_metadat$Sample.Type, duleg = F, func = "r.g", permutations = 9999)
+#Now that we know the handful of chem that is different: Ba, F, and Temp, i'm going to make some simple bar plots here. 
 
-indic.chem <- indic.chem$sign
-indic.chem$MAG_id <- rownames(indic.chem)
-indic.chem$p.fdr <- p.adjust(indic.chem$p.value, method = "fdr")
+subset_chem_relevant = chem_merged[chem_merged$Site == "46001", ]
 
-# write out results
-#write.csv(indic.chem, "indicator_chem.csv")
+# Select the chemistry columns Ba, F, TEMP along with identifier columns
+selected_columns_relevant_chem = subset_chem_relevant[, c("site_id", "Site", "Sample.Type", "Ba", "F", "TEMP", "Na", "ph_field")]
 
-#So there are a handful of significant chemical drivers - and they are all indicators for the Ash Pond.
+long_data = pivot_longer(selected_columns_relevant_chem, cols = c('Ba', 'F', 'TEMP', 'Na', "ph_field"), names_to = 'Chemistry', values_to = 'Value')
 
+# Define the order for Sample.Type
+long_data$Sample.Type = factor(long_data$Sample.Type, levels = c('GW-Upgradient', 'CCP Porewater', 'GW-Downgradient'))
+
+# Create the line plot with facet wrap
+boxplots_chem = ggplot(long_data, aes(x = Sample.Type, y = Value, fill = Sample.Type)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, outlier.size = 2) +
+  labs(title = "Chemistry Values for Each Sample Type at Site 46001",
+       x = "Chemistry",
+       y = "Value",
+       fill = "Sample Type") +
+  theme_minimal(base_size = 15) +
+  scale_fill_manual(values = c("#1f78b4", "#33a02c", "#e31a1c", "#ff7f00")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5),
+        panel.grid.major = element_line(color = "grey80"),
+        panel.grid.minor = element_blank()) +  # Hiding minor grid lines
+  facet_wrap(~Chemistry, scales = "free")
+
+boxplots_chem
+
+#ggsave(boxplots_chem, file="boxplots_chem.pdf", width = 10, height = 6)
+
+#let's close this out with an NMDS of the chem ONLY of Site 46001.
+
+subset_chem_relevant_sampletypes = subset_chem_relevant %>%
+  select(c("site_id"))
+
+subset_chem_relevant_df <- subset_chem_relevant %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "rownames_temp") %>%
+  column_to_rownames(var = "site_id") %>%
+  select(-c(26:28)) %>%
+  select(-c("Be", "Cd", "Pb", "Se", "SO4", "Tl", "rownames_temp")) %>% # have to remove these because they are mostly or all zeroes. Removing anything with 3 or greater zeroes.
+  arrange(rownames(.)) 
+
+#Now to plot this on ggplot.
+Ord_control=metaMDS(subset_chem_relevant_df, distance = "bray", noshare = T, trace = 1, autotransform=T) #make distance matrix
+stressplot(Ord_control) #this is pretty rough but we know we don't have enough samples. just going to proceed.
+
+sites_of_interest = c("3586", "17481", "22354", "46001")
+
+metadata_table_experiment_df_SITES_FINAL = metadata_table_experiment_df %>%
+  filter(site %in% sites_of_interest)
+
+metadata_table_experiment_df_SITES_FINAL_46001 = metadata_table_experiment_df_SITES_FINAL %>%
+  filter(pivot_id == "46001")
+
+Ord_control = as.data.frame(scores(Ord_control)$sites)
+Ord_control$sample_type = metadata_table_experiment_df_SITES_FINAL_46001$sample_type
+
+mcolors=c("#628b29", "#ffcdbd","#2F9DA1")
+
+sample_type_controls_NMDS = Ord_control %>%
+  ggplot(aes(x = NMDS1, y = NMDS2)) +
+  geom_point(aes(color=sample_type), size = 5) +
+  scale_color_manual(values=mcolors) +
+  theme_bw()  +
+  scale_color_manual(values=mcolors) +
+  scale_fill_manual(values=mcolors) +
+  labs(title="Site 46001 NMDS Chem by Sample Type")
+
+sample_type_controls_NMDS
+
+#ggsave(sample_type_controls_NMDS, file="chemnmds_46001.pdf")
 ```
