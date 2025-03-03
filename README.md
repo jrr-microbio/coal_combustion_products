@@ -6,9 +6,9 @@ The supplementary tables that area added here contain multiple sheets that are t
 Christopher E. Bagwell1a*, Josué A Rodríguez-Ramos1a, Sabrina Hoyle1b, Shelby Phillips1b, Frederick D. Day-Lewis1b, Bruce Hensel2
 
 Affiliation: \
-1: Pacific Northwest National Laboratory, 
-a-Environmental and Biological Sciences Directorate 
-b-Energy and Environment Directorate, Richland WA 99354. 
+1: Pacific Northwest National Laboratory, \
+a-Environmental and Biological Sciences Directorate, Richland WA 99354 \
+b-Energy and Environment Directorate, Richland WA 99354 \
 2: EPRI, Groundwater and Land Management Program, Palo Alto CA 94304
 
 ## Abstract: 
